@@ -20,6 +20,29 @@ async function sendToContentScript(action, params = {}) {
   });
 }
 
+async function navigateTab(url) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) throw new Error('No active tab found');
+  await chrome.tabs.update(tab.id, { url });
+  // Wait for the tab to finish loading
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(); // resolve anyway — page may still be usable
+    }, 10000);
+    function listener(tabId, info) {
+      if (tabId === tab.id && info.status === 'complete') {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+  // Give scripts a moment to inject
+  await new Promise(r => setTimeout(r, 800));
+}
+
 export const browserTools = [
   {
     name: 'getPageContent',
@@ -233,6 +256,54 @@ export const browserTools = [
       return sendToContentScript('WAIT_FOR_ELEMENT', {
         selector: p.selector,
         timeoutMs: p?.timeoutMs || 5000
+      });
+    }
+  },
+
+  {
+    name: 'navigateTo',
+    description: 'Navigate the current browser tab to a URL and wait for the page to load. Use this to open a website, social media profile page, or search results URL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'Full URL to navigate to (e.g. "https://twitter.com/search?q=Nicolas+Dupont")'
+        }
+      },
+      required: ['url']
+    },
+    async execute(p) {
+      await navigateTab(p.url);
+      return sendToContentScript('GET_PAGE_CONTENT', { maxLength: 8000 });
+    }
+  },
+
+  {
+    name: 'scrollAndRead',
+    description: 'Scroll the page down and return the newly visible text. Use this to load and read more posts on infinite-scroll feeds (Twitter, LinkedIn, Facebook, etc.).',
+    parameters: {
+      type: 'object',
+      properties: {
+        scrolls: {
+          type: 'number',
+          description: 'Number of scroll steps to perform before reading (default 3, max 10)'
+        },
+        waitMs: {
+          type: 'number',
+          description: 'Milliseconds to wait between each scroll for content to load (default 1200)'
+        },
+        maxLength: {
+          type: 'number',
+          description: 'Maximum characters of page text to return (default 12000)'
+        }
+      }
+    },
+    async execute(p) {
+      return sendToContentScript('SCROLL_AND_READ', {
+        scrolls: Math.min(p?.scrolls || 3, 10),
+        waitMs: p?.waitMs || 1200,
+        maxLength: p?.maxLength || 12000
       });
     }
   }

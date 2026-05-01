@@ -135,6 +135,22 @@ const handlers = {
     return { success: true };
   },
 
+  async SCROLL_AND_READ({ scrolls = 3, waitMs = 1200, maxLength = 12000 } = {}) {
+    const textBefore = document.body?.innerText || '';
+    for (let i = 0; i < scrolls; i++) {
+      window.scrollBy(0, window.innerHeight * 0.85);
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+    const textAfter = (document.body?.innerText || '').slice(0, maxLength);
+    return {
+      title: document.title,
+      url: location.href,
+      text: textAfter,
+      truncated: (document.body?.innerText || '').length > maxLength,
+      newContentLoaded: textAfter.length > textBefore.length
+    };
+  },
+
   WAIT_FOR_ELEMENT({ selector, timeoutMs = 5000 } = {}) {
     return new Promise((resolve) => {
       if (document.querySelector(selector)) {

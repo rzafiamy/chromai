@@ -61,6 +61,44 @@ export function hideTyping() {
   if (el) el.remove();
 }
 
+/**
+ * Show a confirmation card in the sidebar.
+ * Resolves true (confirm) or false (cancel).
+ * Only one confirm card can be active at a time.
+ */
+export function showConfirm({ toolName, description, detail }) {
+  return new Promise((resolve) => {
+    const container = messagesEl();
+
+    const card = document.createElement('div');
+    card.className = 'confirm-card';
+    card.innerHTML = `
+      <div class="confirm-header">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <strong>Action required: ${escapeHtml(toolName)}</strong>
+      </div>
+      <div class="confirm-body">${escapeHtml(description)}</div>
+      ${detail ? `<code class="confirm-detail">${escapeHtml(detail)}</code>` : ''}
+      <div class="confirm-actions">
+        <button class="confirm-btn confirm-cancel">Cancel</button>
+        <button class="confirm-btn confirm-ok">Confirm</button>
+      </div>
+    `;
+
+    card.querySelector('.confirm-ok').addEventListener('click', () => {
+      card.remove();
+      resolve(true);
+    });
+    card.querySelector('.confirm-cancel').addEventListener('click', () => {
+      card.remove();
+      resolve(false);
+    });
+
+    container.appendChild(card);
+    container.scrollTop = container.scrollHeight;
+  });
+}
+
 export function showToolStatus(label) {
   const el = toolStatusEl();
   if (el) {

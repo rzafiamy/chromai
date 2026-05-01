@@ -151,6 +151,140 @@ const handlers = {
     };
   },
 
+  GET_INTERACTIVE_ELEMENTS({ includeHidden = false } = {}) {
+    const INTERACTIVE = 'a[href], button, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [tabindex]';
+
+    function resolveLabel(el) {
+      // 1. explicit <label for="id">
+      if (el.id) {
+        const lbl = document.querySelector(`label[for="${el.id}"]`);
+        if (lbl) return lbl.innerText.trim().slice(0, 80);
+      }
+      // 2. wrapping <label>
+      const wrapLabel = el.closest('label');
+      if (wrapLabel) return wrapLabel.innerText.trim().slice(0, 80);
+      // 3. aria attributes
+      if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').slice(0, 80);
+      if (el.getAttribute('aria-labelledby')) {
+        const ref = document.getElementById(el.getAttribute('aria-labelledby'));
+        if (ref) return ref.innerText.trim().slice(0, 80);
+      }
+      // 4. placeholder / title / name
+      return (el.placeholder || el.title || el.name || el.innerText?.trim() || '').slice(0, 80);
+    }
+
+    function uniqueSelector(el) {
+      if (el.id) return `#${CSS.escape(el.id)}`;
+      if (el.getAttribute('name')) return `${el.tagName.toLowerCase()}[name="${el.getAttribute('name')}"]`;
+      if (el.getAttribute('data-testid')) return `[data-testid="${el.getAttribute('data-testid')}"]`;
+      // Walk up and build nth-of-type path (max 4 levels)
+      const parts = [];
+      let node = el;
+      for (let i = 0; i < 4 && node && node !== document.body; i++) {
+        const tag = node.tagName.toLowerCase();
+        const siblings = node.parentElement ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName) : [];
+        const idx = siblings.indexOf(node) + 1;
+        parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
+        node = node.parentElement;
+      }
+      return parts.join(' > ');
+    }
+
+    function rect(el) {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+    }
+
+    const elements = Array.from(document.querySelectorAll(INTERACTIVE))
+      .filter(el => {
+        if (!includeHidden) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const style = getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        }
+        return true;
+      })
+      .slice(0, 120)
+      .map(el => ({
+        tag: el.tagName.toLowerCase(),
+        type: el.type || el.getAttribute('role') || null,
+        selector: uniqueSelector(el),
+        label: resolveLabel(el),
+        value: el.value !== undefined ? String(el.value).slice(0, 200) : null,
+        checked: el.checked !== undefined ? el.checked : null,
+        disabled: el.disabled || null,
+        placeholder: el.placeholder || null,
+        href: el.href || null,
+        position: rect(el)
+      }));
+
+    return { count: elements.length, elements };
+  },
+
+  GET_FORMS() {
+    function resolveLabel(el) {
+      if (el.id) {
+        const lbl = document.querySelector(`label[for="${el.id}"]`);
+        if (lbl) return lbl.innerText.trim().slice(0, 80);
+      }
+      const wrapLabel = el.closest('label');
+      if (wrapLabel) return wrapLabel.innerText.trim().slice(0, 80);
+      return (el.getAttribute('aria-label') || el.placeholder || el.name || '').slice(0, 80);
+    }
+
+    function uniqueSelector(el) {
+      if (el.id) return `#${CSS.escape(el.id)}`;
+      if (el.getAttribute('name')) return `${el.tagName.toLowerCase()}[name="${el.getAttribute('name')}"]`;
+      const parts = [];
+      let node = el;
+      for (let i = 0; i < 4 && node && node !== document.body; i++) {
+        const tag = node.tagName.toLowerCase();
+        const siblings = node.parentElement ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName) : [];
+        const idx = siblings.indexOf(node) + 1;
+        parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
+        node = node.parentElement;
+      }
+      return parts.join(' > ');
+    }
+
+    const forms = Array.from(document.querySelectorAll('form')).map((form, fi) => {
+      const formSelector = form.id ? `#${CSS.escape(form.id)}` : `form:nth-of-type(${fi + 1})`;
+      const fields = Array.from(form.querySelectorAll('input, select, textarea, button')).map(el => ({
+        tag: el.tagName.toLowerCase(),
+        type: el.type || null,
+        selector: uniqueSelector(el),
+        label: resolveLabel(el),
+        value: el.value !== undefined ? String(el.value).slice(0, 200) : null,
+        placeholder: el.placeholder || null,
+        required: el.required || null,
+        disabled: el.disabled || null
+      }));
+      return {
+        selector: formSelector,
+        action: form.action || null,
+        method: form.method || 'get',
+        fields
+      };
+    });
+
+    // Also surface inputs that are NOT inside a <form> (common in SPAs)
+    const orphanInputs = Array.from(document.querySelectorAll('input, select, textarea'))
+      .filter(el => !el.closest('form'))
+      .map(el => ({
+        tag: el.tagName.toLowerCase(),
+        type: el.type || null,
+        selector: uniqueSelector(el),
+        label: resolveLabel(el),
+        value: el.value !== undefined ? String(el.value).slice(0, 200) : null,
+        placeholder: el.placeholder || null,
+        required: el.required || null,
+        disabled: el.disabled || null
+      }));
+
+    return { forms, orphanInputs };
+  },
+
   WAIT_FOR_ELEMENT({ selector, timeoutMs = 5000 } = {}) {
     return new Promise((resolve) => {
       if (document.querySelector(selector)) {

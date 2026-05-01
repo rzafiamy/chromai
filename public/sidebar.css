@@ -267,3 +267,53 @@ html, body {
 #btn-send:hover { background: var(--accent-hover); }
 #btn-send:active { transform: scale(0.95); }
 #btn-send:disabled { background: var(--border); cursor: not-allowed; }
+
+/* Confirmation card */
+.confirm-card {
+  background: #1e1b4b;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: #f59e0b;
+  font-size: 12px;
+}
+.confirm-body {
+  color: var(--text);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.confirm-detail {
+  display: block;
+  background: #0f0e1a;
+  border-radius: 5px;
+  padding: 5px 8px;
+  color: #a5b4fc;
+  font-size: 11px;
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.confirm-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+.confirm-btn:hover { opacity: 0.85; }
+.confirm-cancel { background: var(--border); color: var(--text); }
+.confirm-ok { background: var(--accent); color: white; }

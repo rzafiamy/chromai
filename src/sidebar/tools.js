@@ -20,12 +20,19 @@ async function sendToContentScript(action, params = {}) {
   });
 }
 
+async function captureTabScreenshot() {
+  // captureVisibleTab must be called from the sidebar (extension page), not content script
+  const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 85 });
+  // Strip the data:image/jpeg;base64, prefix
+  return dataUrl.replace(/^data:image\/\w+;base64,/, '');
+}
+
 async function navigateTab(url) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error('No active tab found');
   await chrome.tabs.update(tab.id, { url });
   // Wait for the tab to finish loading
-  await new Promise((resolve, reject) => {
+  await new Promise((resolve) => {
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
       resolve(); // resolve anyway — page may still be usable
@@ -261,6 +268,32 @@ export const browserTools = [
   },
 
   {
+    name: 'getInteractiveElements',
+    description: 'Return every visible interactive element on the page (inputs, buttons, links, dropdowns, checkboxes) with its resolved label, CSS selector, current value, and screen position. Use this before fillForm or clickElement to discover what is on the page and which selector to use.',
+    parameters: {
+      type: 'object',
+      properties: {
+        includeHidden: {
+          type: 'boolean',
+          description: 'Include elements that are not currently visible (default false)'
+        }
+      }
+    },
+    async execute(p) {
+      return sendToContentScript('GET_INTERACTIVE_ELEMENTS', { includeHidden: p?.includeHidden || false });
+    }
+  },
+
+  {
+    name: 'getForms',
+    description: 'Return all forms on the page grouped by their <form> element, with every field\'s label, selector, type, current value, and required status. Also returns inputs that exist outside a <form> tag (common in React/Vue SPAs). Use this to understand form structure before filling fields.',
+    parameters: { type: 'object', properties: {} },
+    async execute() {
+      return sendToContentScript('GET_FORMS');
+    }
+  },
+
+  {
     name: 'navigateTo',
     description: 'Navigate the current browser tab to a URL and wait for the page to load. Use this to open a website, social media profile page, or search results URL.',
     parameters: {
@@ -276,6 +309,32 @@ export const browserTools = [
     async execute(p) {
       await navigateTab(p.url);
       return sendToContentScript('GET_PAGE_CONTENT', { maxLength: 8000 });
+    }
+  },
+
+  {
+    name: 'analyzePageVisually',
+    description: 'Take a screenshot of the visible page and analyze it using vision/OCR. Use this when: the page content cannot be extracted as text (canvas, image-based UI, PDF viewer, charts), you need to understand visual layout for form filling, or the user asks what they see on screen.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'What to focus on in the analysis, e.g. "find all form fields and their labels", "extract all text visible on screen", "describe the page layout". Defaults to a general OCR + layout description.'
+        }
+      }
+    },
+    // _adapter is injected by lemura's ToolContext when tools are executed
+    async execute(p, context) {
+      const adapter = context?.adapter;
+      if (!adapter) throw new Error('Vision requires a provider adapter in tool context');
+
+      const imageBase64 = await captureTabScreenshot();
+      const prompt = p?.prompt ||
+        'Describe this web page screenshot in detail. Extract all visible text (OCR), identify form fields with their labels, buttons, and the overall layout structure. Be precise about element positions relative to each other.';
+
+      const result = await adapter.describeImage({ imageBase64, prompt });
+      return { analysis: result.description, objects: result.objects };
     }
   },
 

@@ -6,7 +6,8 @@ const DEFAULTS = {
   maxIterations: 15,
   maxSteps: 30,
   contextWindow: 16000,
-  requestTimeout: 120000
+  requestTimeout: 120000,
+  visionModel: ''
 };
 
 export async function getSettings() {

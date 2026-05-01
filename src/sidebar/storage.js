@@ -1,8 +1,12 @@
 const DEFAULTS = {
-  baseUrl: 'https://api.openai.com/v1',
+  baseUrl: 'https://edpt-01.makix.fr/v1',
   apiKey: '',
-  model: 'gpt-4o-mini',
-  systemPrompt: ''
+  model: 'Qwen3.5-4B',
+  systemPrompt: '',
+  maxIterations: 15,
+  maxSteps: 30,
+  contextWindow: 16000,
+  requestTimeout: 120000
 };
 
 export async function getSettings() {

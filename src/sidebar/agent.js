@@ -5,7 +5,9 @@ export function createBrowserSession({ settings, onToolCall }) {
   const adapter = new OpenAICompatibleAdapter({
     baseUrl: settings.baseUrl,
     apiKey: settings.apiKey,
-    defaultModel: settings.model || 'gpt-4o-mini'
+    defaultModel: settings.model || 'gpt-4o-mini',
+    timeout: settings.requestTimeout || 120000,
+    retry: { maxRetries: 1, baseDelayMs: 1000 }
   });
 
   const customSystem = settings.systemPrompt
@@ -15,9 +17,9 @@ export function createBrowserSession({ settings, onToolCall }) {
   const session = new SessionManager({
     adapter,
     model: settings.model || 'gpt-4o-mini',
-    maxTokens: 32000,
-    maxIterations: 15,
-    maxSteps: 30,
+    maxTokens: settings.contextWindow || 128000,
+    maxIterations: settings.maxIterations || 15,
+    maxSteps: settings.maxSteps || 30,
     maxCompletionTokens: 4096,
     tools: browserTools,
     systemPrompt: `You are ChromAI, an AI browser copilot running inside the user's Chrome browser.

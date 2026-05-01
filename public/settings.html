@@ -41,6 +41,31 @@
 
       <section>
         <h2>Agent Configuration</h2>
+
+        <div class="field">
+          <label for="maxIterations">Max Iterations</label>
+          <input type="number" id="maxIterations" min="1" max="100" placeholder="15">
+          <span class="hint">Maximum agent reasoning loops per session (default: 15)</span>
+        </div>
+
+        <div class="field">
+          <label for="maxSteps">Max Steps</label>
+          <input type="number" id="maxSteps" min="1" max="200" placeholder="30">
+          <span class="hint">Maximum total tool calls per session (default: 30)</span>
+        </div>
+
+        <div class="field">
+          <label for="contextWindow">Context Window (tokens)</label>
+          <input type="number" id="contextWindow" min="1024" step="1024" placeholder="128000">
+          <span class="hint">Model's context window size — used for token budget tracking (default: 128000)</span>
+        </div>
+
+        <div class="field">
+          <label for="requestTimeout">Request Timeout (ms)</label>
+          <input type="number" id="requestTimeout" min="5000" step="1000" placeholder="120000">
+          <span class="hint">Per-request timeout in milliseconds — increase for slow/large models (default: 120000)</span>
+        </div>
+
         <div class="field">
           <label for="systemPrompt">Additional System Prompt <span class="optional">(optional)</span></label>
           <textarea id="systemPrompt" rows="4" placeholder="Additional instructions appended to the default system prompt…"></textarea>

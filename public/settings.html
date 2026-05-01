@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChromAI Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <main>
+    <header>
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="#6366f1" stroke-width="1.5"/>
+        <path d="M8 12h8M12 8v8" stroke="#6366f1" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <h1>ChromAI Settings</h1>
+    </header>
+
+    <form id="settings-form">
+      <section>
+        <h2>API Configuration</h2>
+
+        <div class="field">
+          <label for="baseUrl">Base URL</label>
+          <input type="url" id="baseUrl" placeholder="https://api.openai.com/v1" autocomplete="off">
+          <span class="hint">The OpenAI-compatible endpoint base URL</span>
+        </div>
+
+        <div class="field">
+          <label for="apiKey">API Key</label>
+          <input type="password" id="apiKey" placeholder="sk-…" autocomplete="off">
+          <span class="hint">Your API key (stored locally in Chrome storage)</span>
+        </div>
+
+        <div class="field">
+          <label for="model">Model</label>
+          <input type="text" id="model" placeholder="gpt-4o-mini" autocomplete="off">
+          <span class="hint">Model name to use for agent inference</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Agent Configuration</h2>
+        <div class="field">
+          <label for="systemPrompt">Additional System Prompt <span class="optional">(optional)</span></label>
+          <textarea id="systemPrompt" rows="4" placeholder="Additional instructions appended to the default system prompt…"></textarea>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button type="submit" id="btn-save">Save Settings</button>
+        <span id="status-msg" class="status-msg hidden">✓ Saved</span>
+      </div>
+    </form>
+
+    <section class="providers">
+      <h2>Compatible Providers</h2>
+      <table>
+        <thead><tr><th>Provider</th><th>Base URL</th></tr></thead>
+        <tbody>
+          <tr><td>OpenAI</td><td><code>https://api.openai.com/v1</code></td></tr>
+          <tr><td>Groq</td><td><code>https://api.groq.com/openai/v1</code></td></tr>
+          <tr><td>Together AI</td><td><code>https://api.together.xyz/v1</code></td></tr>
+          <tr><td>Ollama (local)</td><td><code>http://localhost:11434/v1</code></td></tr>
+          <tr><td>LM Studio</td><td><code>http://localhost:1234/v1</code></td></tr>
+          <tr><td>OpenRouter</td><td><code>https://openrouter.ai/api/v1</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script type="module" src="../src/settings/settings.js"></script>
+</body>
+</html>

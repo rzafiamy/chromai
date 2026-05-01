@@ -1,0 +1,18 @@
+{
+  "name": "chromai",
+  "version": "1.0.0",
+  "description": "AI browser copilot Chrome extension using lemura agent framework",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build && node scripts/build-content.js",
+    "build:all": "npm run build",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "lemura": "file:../../../../../../tmp/lemura-src"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

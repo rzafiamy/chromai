@@ -10,6 +10,7 @@ getSettings().then(settings => {
   document.getElementById('model').value = settings.model || '';
   document.getElementById('systemPrompt').value = settings.systemPrompt || '';
   document.getElementById('visionModel').value = settings.visionModel || '';
+  document.getElementById('asrUrl').value = settings.asrUrl || '';
   document.getElementById('maxIterations').value = settings.maxIterations ?? 15;
   document.getElementById('maxSteps').value = settings.maxSteps ?? 30;
   document.getElementById('contextWindow').value = settings.contextWindow ?? 128000;
@@ -24,6 +25,7 @@ form.addEventListener('submit', async (e) => {
     model: document.getElementById('model').value.trim(),
     systemPrompt: document.getElementById('systemPrompt').value.trim(),
     visionModel: document.getElementById('visionModel').value.trim(),
+    asrUrl: document.getElementById('asrUrl').value.trim(),
     maxIterations: parseInt(document.getElementById('maxIterations').value, 10) || 15,
     maxSteps: parseInt(document.getElementById('maxSteps').value, 10) || 30,
     contextWindow: parseInt(document.getElementById('contextWindow').value, 10) || 128000,

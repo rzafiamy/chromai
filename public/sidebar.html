@@ -10,20 +10,27 @@
   <div id="app">
     <header id="header">
       <div class="header-left">
-        <svg class="logo-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="#6366f1" stroke-width="2"/>
-          <path d="M8 12h8M12 8v8" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+        <svg class="logo-icon" width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="url(#lg)" stroke-width="1.8"/>
+          <path d="M8 12h8M12 8v8" stroke="url(#lg)" stroke-width="2" stroke-linecap="round"/>
+          <defs>
+            <linearGradient id="lg" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#6366f1"/>
+              <stop offset="100%" stop-color="#a855f7"/>
+            </linearGradient>
+          </defs>
         </svg>
         <span class="logo-text">ChromAI</span>
+        <span id="model-badge" class="model-badge"></span>
       </div>
       <div class="header-actions">
         <button id="btn-settings" title="Settings" class="icon-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
         </button>
         <button id="btn-clear" title="Clear chat" class="icon-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
           </svg>
         </button>
@@ -33,30 +40,53 @@
     <div id="chat-container">
       <div id="messages">
         <div class="welcome-message">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="#6366f1" stroke-width="1.5"/>
-            <path d="M8 12h8M12 8v8" stroke="#6366f1" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-          <p>Hi! I'm ChromAI, your browser copilot.</p>
-          <p class="welcome-sub">Ask me to read, summarize, or interact with the current page.</p>
+          <div class="welcome-logo">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="url(#wlg)" stroke-width="1.5"/>
+              <path d="M8 12h8M12 8v8" stroke="url(#wlg)" stroke-width="2" stroke-linecap="round"/>
+              <defs>
+                <linearGradient id="wlg" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#6366f1"/>
+                  <stop offset="100%" stop-color="#a855f7"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <p class="welcome-title">Hi, I'm ChromAI</p>
+          <p class="welcome-sub">Your AI browser copilot. Ask me to read, summarize, click, or interact with this page.</p>
+          <div class="welcome-chips">
+            <button class="welcome-chip" data-prompt="Summarize this page">Summarize page</button>
+            <button class="welcome-chip" data-prompt="Extract all links from this page">Extract links</button>
+            <button class="welcome-chip" data-prompt="What are the main topics on this page?">Main topics</button>
+          </div>
         </div>
       </div>
-      <div id="tool-status" class="hidden"></div>
     </div>
 
     <form id="input-form">
-      <div class="input-row">
-        <textarea
-          id="user-input"
-          placeholder="Ask about this page… (Enter to send, Shift+Enter for newline)"
-          rows="1"
-          maxlength="4000"
-        ></textarea>
-        <button type="submit" id="btn-send" title="Send">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-        </button>
+      <div class="input-wrap">
+        <div class="input-row">
+          <textarea
+            id="user-input"
+            placeholder="Ask about this page…"
+            rows="1"
+            maxlength="4000"
+          ></textarea>
+          <div class="input-actions">
+            <button type="button" id="btn-mic" class="input-icon-btn" title="Voice input (Whisper ASR)">
+              <svg id="mic-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="2" width="6" height="13" rx="3"/>
+                <path d="M5 10a7 7 0 0 0 14 0M12 19v3M9 22h6"/>
+              </svg>
+            </button>
+            <button type="submit" id="btn-send" title="Send (Enter)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="input-hint">Enter to send · Shift+Enter for newline · Mic for voice</div>
       </div>
     </form>
   </div>

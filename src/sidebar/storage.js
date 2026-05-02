@@ -7,7 +7,8 @@ const DEFAULTS = {
   maxSteps: 30,
   contextWindow: 16000,
   requestTimeout: 120000,
-  visionModel: ''
+  visionModel: '',
+  asrUrl: ''
 };
 
 export async function getSettings() {

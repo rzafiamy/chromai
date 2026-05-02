@@ -61,6 +61,12 @@
         </div>
 
         <div class="field">
+          <label for="asrUrl">ASR Endpoint URL <span class="optional">(optional)</span></label>
+          <input type="url" id="asrUrl" placeholder="auto-derived from Base URL" autocomplete="off">
+          <span class="hint">Whisper ASR endpoint for voice input. Defaults to <code>{baseUrl}/audio/transcriptions</code> using the <code>whisper-large-v3</code> model.</span>
+        </div>
+
+        <div class="field">
           <label for="visionModel">Vision / OCR Model <span class="optional">(optional)</span></label>
           <input type="text" id="visionModel" placeholder="same as main model" autocomplete="off">
           <span class="hint">Model used for screenshot analysis and OCR. Leave empty to use the main model (must support vision).</span>

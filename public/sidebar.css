@@ -61,6 +61,13 @@ html, body {
   min-width: 0;
 }
 
+.logo-img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
 .logo-text {
   font-size: 14px;
   font-weight: 700;
@@ -128,10 +135,18 @@ html, body {
 }
 
 .welcome-logo {
-  padding: 14px;
-  background: var(--accent-soft);
-  border-radius: 50%;
-  border: 1px solid rgba(99,102,241,0.2);
+  padding: 8px;
+  background: var(--bg2);
+  border-radius: 20%;
+  border: 1px solid var(--border-light);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.welcome-logo-img {
+  width: 56px;
+  height: 56px;
+  display: block;
+  object-fit: contain;
 }
 
 .welcome-title {

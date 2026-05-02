@@ -1,31 +1,22 @@
 const messagesEl = () => document.getElementById('messages');
-const toolStatusEl = () => document.getElementById('tool-status');
 const typingEl = () => document.getElementById('typing-indicator');
 
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+const escapeHtml = (str) => str
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
 
-// Very light markdown: bold, inline code, code blocks, line breaks
-function renderMarkdown(text) {
-  // Code blocks
+const renderMarkdown = (text) => {
   text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
     `<pre><code>${escapeHtml(code.trim())}</code></pre>`
   );
-  // Inline code
   text = text.replace(/`([^`]+)`/g, (_, code) => `<code>${escapeHtml(code)}</code>`);
-  // Bold
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // Line breaks
-  text = text.replace(/\n/g, '<br>');
-  return text;
-}
+  return text.replace(/\n/g, '<br>');
+};
 
-export function renderMessage(role, content) {
+export const renderMessage = (role, content) => {
   const container = messagesEl();
   const div = document.createElement('div');
   div.className = `message message-${role}`;
@@ -41,9 +32,9 @@ export function renderMessage(role, content) {
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
-}
+};
 
-export function showTyping() {
+export const showTyping = () => {
   let el = typingEl();
   if (!el) {
     el = document.createElement('div');
@@ -54,22 +45,13 @@ export function showTyping() {
   }
   el.style.display = 'flex';
   messagesEl().scrollTop = messagesEl().scrollHeight;
-}
+};
 
-export function hideTyping() {
-  const el = typingEl();
-  if (el) el.remove();
-}
+export const hideTyping = () => typingEl()?.remove();
 
-/**
- * Show a confirmation card in the sidebar.
- * Resolves true (confirm) or false (cancel).
- * Only one confirm card can be active at a time.
- */
-export function showConfirm({ toolName, description, detail }) {
-  return new Promise((resolve) => {
+export const showConfirm = ({ toolName, description, detail }) =>
+  new Promise((resolve) => {
     const container = messagesEl();
-
     const card = document.createElement('div');
     card.className = 'confirm-card';
     card.innerHTML = `
@@ -84,30 +66,63 @@ export function showConfirm({ toolName, description, detail }) {
         <button class="confirm-btn confirm-ok">Confirm</button>
       </div>
     `;
-
-    card.querySelector('.confirm-ok').addEventListener('click', () => {
-      card.remove();
-      resolve(true);
-    });
-    card.querySelector('.confirm-cancel').addEventListener('click', () => {
-      card.remove();
-      resolve(false);
-    });
-
+    card.querySelector('.confirm-ok').addEventListener('click', () => { card.remove(); resolve(true); });
+    card.querySelector('.confirm-cancel').addEventListener('click', () => { card.remove(); resolve(false); });
     container.appendChild(card);
     container.scrollTop = container.scrollHeight;
   });
-}
 
-export function showToolStatus(label) {
-  const el = toolStatusEl();
-  if (el) {
-    el.textContent = `⚙ ${label}`;
-    el.classList.remove('hidden');
-  }
-}
+const TOOL_ICONS = {
+  getPageContent: '📄', getPageMeta: '🏷️', getSelectedText: '✂️',
+  extractLinks: '🔗', extractTable: '📊', getInteractiveElements: '🖱️',
+  getForms: '📋', clickElement: '👆', fillForm: '✏️', submitForm: '📤',
+  navigateTo: '🌐', scrollPage: '⬇️', scrollAndRead: '📖',
+  highlightElement: '🔦', waitForElement: '⏳', analyzePageVisually: '👁️'
+};
 
-export function hideToolStatus() {
-  const el = toolStatusEl();
-  if (el) el.classList.add('hidden');
-}
+const TOOL_LABELS = {
+  getPageContent: 'Reading page content',
+  getPageMeta: 'Reading page metadata',
+  getSelectedText: 'Getting selected text',
+  extractLinks: 'Extracting links',
+  extractTable: 'Extracting table',
+  getInteractiveElements: 'Scanning interactive elements',
+  getForms: 'Scanning forms',
+  clickElement: 'Clicking element',
+  fillForm: 'Filling form',
+  submitForm: 'Submitting form',
+  navigateTo: 'Navigating to page',
+  scrollPage: 'Scrolling page',
+  scrollAndRead: 'Scrolling and reading',
+  highlightElement: 'Highlighting element',
+  waitForElement: 'Waiting for element',
+  analyzePageVisually: 'Analyzing page visually'
+};
+
+export const showToolActivity = (toolName, argsJson) => {
+  const container = messagesEl();
+  const icon = TOOL_ICONS[toolName] || '⚙️';
+  const label = TOOL_LABELS[toolName] || toolName.replace(/([A-Z])/g, ' $1').trim().toLowerCase();
+
+  let detail = '';
+  try {
+    const { url, selector, fields, direction } = JSON.parse(argsJson || '{}');
+    if (url) detail = url;
+    else if (selector) detail = selector;
+    else if (fields) detail = fields.map(({ selector: s }) => s).join(', ');
+    else if (direction) detail = direction;
+  } catch { /* ignore */ }
+
+  const div = document.createElement('div');
+  div.className = 'tool-activity';
+  div.innerHTML = `<span class="tool-activity-icon">${icon}</span><span class="tool-activity-label">${label}${detail ? `<span class="tool-activity-detail"> — ${escapeHtml(String(detail).slice(0, 80))}</span>` : ''}</span><span class="tool-activity-spinner"></span>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+};
+
+export const resolveToolActivity = (div) => {
+  if (!div) return;
+  div.querySelector('.tool-activity-spinner')?.remove();
+  div.classList.add('tool-activity-done');
+};

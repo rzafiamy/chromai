@@ -1,54 +1,89 @@
 // Browser tool definitions for the lemura agent.
 // Each tool sends a message to the content script running in the active tab.
 
-async function sendToContentScript(action, params = {}) {
+const getActiveTab = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error('No active tab found');
+  return tab;
+};
 
-  return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tab.id, { action, ...params }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      if (response?.success === false) {
-        reject(new Error(response.error || 'Tool execution failed'));
-        return;
-      }
+const isNoReceiverError = (msg) => msg?.includes('Receiving end does not exist') || msg?.includes('Could not establish connection');
+
+const injectContentScript = (tabId) =>
+  chrome.scripting.executeScript({ target: { tabId }, files: ['content/content-script.js'] });
+
+const sendMessage = (tabId, payload) =>
+  new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, payload, (response) => {
+      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+      if (response?.success === false) { reject(new Error(response.error || 'Tool execution failed')); return; }
       resolve(response?.data ?? response);
     });
   });
-}
 
-async function captureTabScreenshot() {
+const sendToContentScript = async (action, params = {}) => {
+  const tab = await getActiveTab();
+  const payload = { action, ...params };
+  try {
+    return await sendMessage(tab.id, payload);
+  } catch (err) {
+    if (!isNoReceiverError(err.message)) throw err;
+    // Content script not yet injected in this tab (stale tab or restricted page).
+    // Inject on demand and retry once.
+    await injectContentScript(tab.id);
+    await new Promise((r) => setTimeout(r, 200));
+    return sendMessage(tab.id, payload);
+  }
+};
+
+const captureTabScreenshot = async () => {
   // captureVisibleTab must be called from the sidebar (extension page), not content script
   const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 85 });
-  // Strip the data:image/jpeg;base64, prefix
   return dataUrl.replace(/^data:image\/\w+;base64,/, '');
-}
+};
 
-async function navigateTab(url) {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw new Error('No active tab found');
+const navigateTab = async (url) => {
+  const tab = await getActiveTab();
   await chrome.tabs.update(tab.id, { url });
-  // Wait for the tab to finish loading
   await new Promise((resolve) => {
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
-      resolve(); // resolve anyway — page may still be usable
+      resolve();
     }, 10000);
-    function listener(tabId, info) {
+    const listener = (tabId, info) => {
       if (tabId === tab.id && info.status === 'complete') {
         clearTimeout(timeout);
         chrome.tabs.onUpdated.removeListener(listener);
         resolve();
       }
-    }
+    };
     chrome.tabs.onUpdated.addListener(listener);
   });
-  // Give scripts a moment to inject
-  await new Promise(r => setTimeout(r, 800));
-}
+  await new Promise((r) => setTimeout(r, 800));
+};
+
+export const capturePageContext = async () => {
+  try {
+    const tab = await getActiveTab();
+    const ask = () => new Promise((resolve) => {
+      chrome.tabs.sendMessage(tab.id, { action: 'GET_PAGE_CONTEXT' }, (response) => {
+        const errMsg = chrome.runtime.lastError?.message;
+        if (errMsg || !response?.success) { resolve({ error: errMsg }); return; }
+        resolve({ data: response.data });
+      });
+    });
+    const first = await ask();
+    if (first.data !== undefined) return first.data;
+    if (!isNoReceiverError(first.error)) return null;
+    // Content script missing — inject and retry once.
+    await injectContentScript(tab.id);
+    await new Promise((r) => setTimeout(r, 200));
+    const retry = await ask();
+    return retry.data ?? null;
+  } catch {
+    return null;
+  }
+};
 
 export const browserTools = [
   {
@@ -57,33 +92,24 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        maxLength: {
-          type: 'number',
-          description: 'Maximum characters to return (default 12000)'
-        }
+        maxLength: { type: 'number', description: 'Maximum characters to return (default 12000)' }
       }
     },
-    async execute(p) {
-      return sendToContentScript('GET_PAGE_CONTENT', { maxLength: p?.maxLength || 12000 });
-    }
+    execute: (p) => sendToContentScript('GET_PAGE_CONTENT', { maxLength: p?.maxLength || 12000 })
   },
 
   {
     name: 'getPageMeta',
     description: 'Get page metadata: title, description, og:title, og:image, canonical URL, language.',
     parameters: { type: 'object', properties: {} },
-    async execute() {
-      return sendToContentScript('GET_META');
-    }
+    execute: () => sendToContentScript('GET_META')
   },
 
   {
     name: 'getSelectedText',
     description: 'Get any text the user has currently selected/highlighted on the page.',
     parameters: { type: 'object', properties: {} },
-    async execute() {
-      return sendToContentScript('GET_SELECTED_TEXT');
-    }
+    execute: () => sendToContentScript('GET_SELECTED_TEXT')
   },
 
   {
@@ -92,19 +118,11 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        selector: {
-          type: 'string',
-          description: 'CSS selector to scope extraction (e.g. "nav", "main", "#sidebar"). Defaults to full page.'
-        },
-        limit: {
-          type: 'number',
-          description: 'Maximum number of links to return (default 50)'
-        }
+        selector: { type: 'string', description: 'CSS selector to scope extraction (e.g. "nav", "main", "#sidebar"). Defaults to full page.' },
+        limit: { type: 'number', description: 'Maximum number of links to return (default 50)' }
       }
     },
-    async execute(p) {
-      return sendToContentScript('EXTRACT_LINKS', { selector: p?.selector, limit: p?.limit || 50 });
-    }
+    execute: (p) => sendToContentScript('EXTRACT_LINKS', { selector: p?.selector, limit: p?.limit || 50 })
   },
 
   {
@@ -113,16 +131,11 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        selector: {
-          type: 'string',
-          description: 'CSS selector for the table element (e.g. "table", "#results-table", ".data-grid")'
-        }
+        selector: { type: 'string', description: 'CSS selector for the table element (e.g. "table", "#results-table", ".data-grid")' }
       },
       required: ['selector']
     },
-    async execute(p) {
-      return sendToContentScript('EXTRACT_TABLE', { selector: p.selector });
-    }
+    execute: ({ selector }) => sendToContentScript('EXTRACT_TABLE', { selector })
   },
 
   {
@@ -131,23 +144,12 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        selector: {
-          type: 'string',
-          description: 'CSS selector of the element to click (e.g. "#submit-btn", "button.primary", "a[href*=login]")'
-        },
-        waitAfterMs: {
-          type: 'number',
-          description: 'Milliseconds to wait after clicking for page to update (default 500)'
-        }
+        selector: { type: 'string', description: 'CSS selector of the element to click (e.g. "#submit-btn", "button.primary", "a[href*=login]")' },
+        waitAfterMs: { type: 'number', description: 'Milliseconds to wait after clicking for page to update (default 500)' }
       },
       required: ['selector']
     },
-    async execute(p) {
-      return sendToContentScript('CLICK_ELEMENT', {
-        selector: p.selector,
-        waitAfterMs: p?.waitAfterMs || 500
-      });
-    }
+    execute: ({ selector, waitAfterMs = 500 }) => sendToContentScript('CLICK_ELEMENT', { selector, waitAfterMs })
   },
 
   {
@@ -171,9 +173,7 @@ export const browserTools = [
       },
       required: ['fields']
     },
-    async execute(p) {
-      return sendToContentScript('FILL_FORM', { fields: p.fields });
-    }
+    execute: ({ fields }) => sendToContentScript('FILL_FORM', { fields })
   },
 
   {
@@ -182,16 +182,11 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        selector: {
-          type: 'string',
-          description: 'CSS selector of the form element or a submit button inside it'
-        }
+        selector: { type: 'string', description: 'CSS selector of the form element or a submit button inside it' }
       },
       required: ['selector']
     },
-    async execute(p) {
-      return sendToContentScript('SUBMIT_FORM', { selector: p.selector });
-    }
+    execute: ({ selector }) => sendToContentScript('SUBMIT_FORM', { selector })
   },
 
   {
@@ -200,28 +195,16 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        direction: {
-          type: 'string',
-          enum: ['up', 'down', 'top', 'bottom'],
-          description: 'Scroll direction (default: down)'
-        },
-        amount: {
-          type: 'number',
-          description: 'Pixels to scroll for up/down (default: 500)'
-        },
-        selector: {
-          type: 'string',
-          description: 'CSS selector of element to scroll into view. Overrides direction/amount.'
-        }
+        direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Scroll direction (default: down)' },
+        amount: { type: 'number', description: 'Pixels to scroll for up/down (default: 500)' },
+        selector: { type: 'string', description: 'CSS selector of element to scroll into view. Overrides direction/amount.' }
       }
     },
-    async execute(p) {
-      return sendToContentScript('SCROLL_PAGE', {
-        direction: p?.direction || 'down',
-        amount: p?.amount || 500,
-        selector: p?.selector
-      });
-    }
+    execute: (p) => sendToContentScript('SCROLL_PAGE', {
+      direction: p?.direction || 'down',
+      amount: p?.amount || 500,
+      selector: p?.selector
+    })
   },
 
   {
@@ -230,16 +213,11 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        selector: {
-          type: 'string',
-          description: 'CSS selector of the element to highlight'
-        }
+        selector: { type: 'string', description: 'CSS selector of the element to highlight' }
       },
       required: ['selector']
     },
-    async execute(p) {
-      return sendToContentScript('HIGHLIGHT_ELEMENT', { selector: p.selector });
-    }
+    execute: ({ selector }) => sendToContentScript('HIGHLIGHT_ELEMENT', { selector })
   },
 
   {
@@ -248,23 +226,12 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        selector: {
-          type: 'string',
-          description: 'CSS selector to wait for'
-        },
-        timeoutMs: {
-          type: 'number',
-          description: 'Maximum wait time in milliseconds (default 5000)'
-        }
+        selector: { type: 'string', description: 'CSS selector to wait for' },
+        timeoutMs: { type: 'number', description: 'Maximum wait time in milliseconds (default 5000)' }
       },
       required: ['selector']
     },
-    async execute(p) {
-      return sendToContentScript('WAIT_FOR_ELEMENT', {
-        selector: p.selector,
-        timeoutMs: p?.timeoutMs || 5000
-      });
-    }
+    execute: ({ selector, timeoutMs = 5000 }) => sendToContentScript('WAIT_FOR_ELEMENT', { selector, timeoutMs })
   },
 
   {
@@ -273,24 +240,17 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        includeHidden: {
-          type: 'boolean',
-          description: 'Include elements that are not currently visible (default false)'
-        }
+        includeHidden: { type: 'boolean', description: 'Include elements that are not currently visible (default false)' }
       }
     },
-    async execute(p) {
-      return sendToContentScript('GET_INTERACTIVE_ELEMENTS', { includeHidden: p?.includeHidden || false });
-    }
+    execute: (p) => sendToContentScript('GET_INTERACTIVE_ELEMENTS', { includeHidden: p?.includeHidden || false })
   },
 
   {
     name: 'getForms',
-    description: 'Return all forms on the page grouped by their <form> element, with every field\'s label, selector, type, current value, and required status. Also returns inputs that exist outside a <form> tag (common in React/Vue SPAs). Use this to understand form structure before filling fields.',
+    description: "Return all forms on the page grouped by their <form> element, with every field's label, selector, type, current value, and required status. Also returns inputs that exist outside a <form> tag (common in React/Vue SPAs). Use this to understand form structure before filling fields.",
     parameters: { type: 'object', properties: {} },
-    async execute() {
-      return sendToContentScript('GET_FORMS');
-    }
+    execute: () => sendToContentScript('GET_FORMS')
   },
 
   {
@@ -299,15 +259,12 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        url: {
-          type: 'string',
-          description: 'Full URL to navigate to (e.g. "https://twitter.com/search?q=Nicolas+Dupont")'
-        }
+        url: { type: 'string', description: 'Full URL to navigate to (e.g. "https://twitter.com/search?q=Nicolas+Dupont")' }
       },
       required: ['url']
     },
-    async execute(p) {
-      await navigateTab(p.url);
+    execute: async ({ url }) => {
+      await navigateTab(url);
       return sendToContentScript('GET_PAGE_CONTENT', { maxLength: 8000 });
     }
   },
@@ -318,15 +275,12 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        prompt: {
-          type: 'string',
-          description: 'What to focus on in the analysis, e.g. "find all form fields and their labels", "extract all text visible on screen", "describe the page layout". Defaults to a general OCR + layout description.'
-        }
+        prompt: { type: 'string', description: 'What to focus on in the analysis, e.g. "find all form fields and their labels", "extract all text visible on screen", "describe the page layout". Defaults to a general OCR + layout description.' }
       }
     },
     // _adapter is injected by lemura's ToolContext when tools are executed
-    async execute(p, context) {
-      const adapter = context?.adapter;
+    execute: async (p, context) => {
+      const { adapter } = context ?? {};
       if (!adapter) throw new Error('Vision requires a provider adapter in tool context');
 
       const imageBase64 = await captureTabScreenshot();
@@ -344,26 +298,15 @@ export const browserTools = [
     parameters: {
       type: 'object',
       properties: {
-        scrolls: {
-          type: 'number',
-          description: 'Number of scroll steps to perform before reading (default 3, max 10)'
-        },
-        waitMs: {
-          type: 'number',
-          description: 'Milliseconds to wait between each scroll for content to load (default 1200)'
-        },
-        maxLength: {
-          type: 'number',
-          description: 'Maximum characters of page text to return (default 12000)'
-        }
+        scrolls: { type: 'number', description: 'Number of scroll steps to perform before reading (default 3, max 10)' },
+        waitMs: { type: 'number', description: 'Milliseconds to wait between each scroll for content to load (default 1200)' },
+        maxLength: { type: 'number', description: 'Maximum characters of page text to return (default 12000)' }
       }
     },
-    async execute(p) {
-      return sendToContentScript('SCROLL_AND_READ', {
-        scrolls: Math.min(p?.scrolls || 3, 10),
-        waitMs: p?.waitMs || 1200,
-        maxLength: p?.maxLength || 12000
-      });
-    }
+    execute: (p) => sendToContentScript('SCROLL_AND_READ', {
+      scrolls: Math.min(p?.scrolls || 3, 10),
+      waitMs: p?.waitMs || 1200,
+      maxLength: p?.maxLength || 12000
+    })
   }
 ];

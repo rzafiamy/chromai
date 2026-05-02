@@ -285,6 +285,75 @@ const handlers = {
     return { forms, orphanInputs };
   },
 
+  GET_PAGE_CONTEXT({ textLength = 4000, maxElements = 40 } = {}) {
+    // Compact DOM structure: headings + landmark roles to give shape without noise
+    function domSummary() {
+      const landmarks = Array.from(document.querySelectorAll(
+        'h1,h2,h3,nav,main,header,footer,aside,section,article,[role="main"],[role="navigation"],[role="search"]'
+      )).slice(0, 30).map(el => {
+        const tag = el.tagName.toLowerCase();
+        const role = el.getAttribute('role') || '';
+        const text = (el.innerText || '').trim().slice(0, 60).replace(/\s+/g, ' ');
+        return `<${tag}${role ? ` role="${role}"` : ''}>${text ? ` "${text}"` : ''}`;
+      });
+      return landmarks.join('\n');
+    }
+
+    // Key interactive elements with selectors — same logic as GET_INTERACTIVE_ELEMENTS but compact
+    const INTERACTIVE = 'button, input:not([type=hidden]), select, textarea, a[href], [role="button"], [role="tab"], [role="menuitem"]';
+
+    function resolveLabel(el) {
+      if (el.id) {
+        const lbl = document.querySelector(`label[for="${el.id}"]`);
+        if (lbl) return lbl.innerText.trim().slice(0, 60);
+      }
+      const wrapLabel = el.closest('label');
+      if (wrapLabel) return wrapLabel.innerText.trim().slice(0, 60);
+      return (el.getAttribute('aria-label') || el.placeholder || el.title || el.name || el.innerText?.trim() || '').slice(0, 60);
+    }
+
+    function uniqueSelector(el) {
+      if (el.id) return `#${CSS.escape(el.id)}`;
+      if (el.getAttribute('name')) return `${el.tagName.toLowerCase()}[name="${el.getAttribute('name')}"]`;
+      if (el.getAttribute('data-testid')) return `[data-testid="${el.getAttribute('data-testid')}"]`;
+      const parts = [];
+      let node = el;
+      for (let i = 0; i < 4 && node && node !== document.body; i++) {
+        const tag = node.tagName.toLowerCase();
+        const siblings = node.parentElement ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName) : [];
+        const idx = siblings.indexOf(node) + 1;
+        parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
+        node = node.parentElement;
+      }
+      return parts.join(' > ');
+    }
+
+    const elements = Array.from(document.querySelectorAll(INTERACTIVE))
+      .filter(el => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const s = getComputedStyle(el);
+        return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+      })
+      .slice(0, maxElements)
+      .map(el => ({
+        tag: el.tagName.toLowerCase(),
+        type: el.type || el.getAttribute('role') || null,
+        selector: uniqueSelector(el),
+        label: resolveLabel(el),
+        value: el.value !== undefined && el.value ? String(el.value).slice(0, 80) : null
+      }));
+
+    return {
+      url: location.href,
+      title: document.title,
+      text: (document.body?.innerText || '').slice(0, textLength),
+      textTruncated: (document.body?.innerText || '').length > textLength,
+      domSummary: domSummary(),
+      interactiveElements: elements
+    };
+  },
+
   WAIT_FOR_ELEMENT({ selector, timeoutMs = 5000 } = {}) {
     return new Promise((resolve) => {
       if (document.querySelector(selector)) {

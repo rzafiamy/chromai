@@ -10,7 +10,7 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "lemura": "file:../../../../../../tmp/lemura-src"
+    "lemura": "^1.4.0"
   },
   "devDependencies": {
     "vite": "^5.0.0"

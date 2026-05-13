@@ -24,6 +24,13 @@ const initSession = async () => {
 const handleSubmit = async (userText) => {
   if (isRunning || !userText.trim()) return;
 
+  // "remove", "clear", "deselect", "reset" the region → clear it immediately
+  if (getFocusRegion() && /\b(remove|clear|deselect|reset|cancel|delete)\b.*\b(region|selection|focus|frame|zone|area)\b|\b(region|selection|focus|frame|zone|area)\b.*\b(remove|clear|deselect|reset|cancel|delete)\b/i.test(userText)) {
+    clearFocusRegion();
+    showToast('Focus region cleared');
+    return;
+  }
+
   if (!session) {
     session = await initSession();
     if (!session) return;

@@ -748,7 +748,7 @@ function _showRegionHighlight(selector) {
   const badge = document.createElement('div');
   Object.assign(badge.style, {
     position: 'absolute', top: '0', left: '0',
-    background: '#6366f1', color: '#fff', fontSize: '10px', fontFamily: 'monospace',
+    background: '#10b981', color: '#fff', fontSize: '10px', fontFamily: 'monospace',
     padding: '1px 5px', borderRadius: '0 0 4px 0', pointerEvents: 'none',
     whiteSpace: 'nowrap', maxWidth: '240px',
     overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '16px'
@@ -759,9 +759,9 @@ function _showRegionHighlight(selector) {
   _regionHighlight = document.createElement('div');
   Object.assign(_regionHighlight.style, {
     position: 'fixed', pointerEvents: 'none', zIndex: '2147483646',
-    border: '2px solid #6366f1', borderRadius: '3px',
-    background: 'rgba(99,102,241,0.08)',
-    boxShadow: '0 0 0 1px rgba(99,102,241,0.4)',
+    border: '2px solid #10b981', borderRadius: '3px',
+    background: 'rgba(16,185,129,0.08)',
+    boxShadow: '0 0 0 1px rgba(16,185,129,0.4)',
   });
   _regionHighlight.appendChild(badge);
   document.documentElement.appendChild(_regionHighlight);

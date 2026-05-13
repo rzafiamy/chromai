@@ -69,33 +69,70 @@ const handlers = {
   async CLICK_ELEMENT({ selector, waitAfterMs = 500 } = {}) {
     const el = document.querySelector(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
-    el.click();
+
+    el.focus();
+
+    // Fire a full pointer event sequence so React/Vue synthetic handlers fire
+    const rect = el.getBoundingClientRect();
+    const cx = Math.round(rect.left + rect.width / 2);
+    const cy = Math.round(rect.top + rect.height / 2);
+    const pointerOpts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+
+    el.dispatchEvent(new PointerEvent('pointerover', pointerOpts));
+    el.dispatchEvent(new MouseEvent('mouseover', pointerOpts));
+    el.dispatchEvent(new PointerEvent('pointerenter', { ...pointerOpts, bubbles: false }));
+    el.dispatchEvent(new MouseEvent('mouseenter', { ...pointerOpts, bubbles: false }));
+    el.dispatchEvent(new PointerEvent('pointermove', pointerOpts));
+    el.dispatchEvent(new MouseEvent('mousemove', pointerOpts));
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...pointerOpts, button: 0, buttons: 1 }));
+    el.dispatchEvent(new MouseEvent('mousedown', { ...pointerOpts, button: 0, buttons: 1 }));
+    el.dispatchEvent(new PointerEvent('pointerup', { ...pointerOpts, button: 0 }));
+    el.dispatchEvent(new MouseEvent('mouseup', { ...pointerOpts, button: 0 }));
+    el.click(); // native click as final step
+
     await new Promise(r => setTimeout(r, waitAfterMs));
     return { success: true, clicked: el.innerText?.trim().slice(0, 80) || el.tagName };
   },
 
   FILL_FORM({ fields = [] } = {}) {
+    function fillOne(el, value) {
+      el.focus();
+
+      // contenteditable (Grok, Twitter, Notion, …)
+      if (el.isContentEditable) {
+        el.innerHTML = '';
+        document.execCommand('insertText', false, value);
+        if (!el.textContent.includes(value)) {
+          // execCommand not supported — set innerText and fire events manually
+          el.innerText = value;
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
+        }
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+
+      // Standard input / textarea
+      const proto = el.tagName === 'TEXTAREA'
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) setter.call(el, value);
+      else el.value = value;
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
     const results = [];
     for (const { selector, value } of fields) {
       const el = document.querySelector(selector);
       if (!el) { results.push({ selector, success: false, error: 'Not found' }); continue; }
-
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        el.tagName === 'TEXTAREA'
-          ? window.HTMLTextAreaElement.prototype
-          : window.HTMLInputElement.prototype,
-        'value'
-      )?.set;
-
-      if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(el, value);
-      } else {
-        el.value = value;
+      try {
+        fillOne(el, value);
+        results.push({ selector, success: true });
+      } catch (e) {
+        results.push({ selector, success: false, error: e.message });
       }
-
-      el.dispatchEvent(new InputEvent('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      results.push({ selector, success: true });
     }
     return { filled: results.filter(r => r.success).length, results };
   },
@@ -103,16 +140,34 @@ const handlers = {
   SUBMIT_FORM({ selector } = {}) {
     const el = document.querySelector(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
+
+    // 1. Explicit <form> submit
     const form = el.tagName === 'FORM' ? el : el.closest('form');
     if (form) {
-      const submitBtn = form.querySelector('[type="submit"]');
+      const submitBtn = form.querySelector('[type="submit"]:not([disabled])');
       if (submitBtn) { submitBtn.click(); return { success: true, method: 'submit-button' }; }
-      form.submit();
+      form.requestSubmit?.() ?? form.submit();
       return { success: true, method: 'form-submit' };
     }
-    // Might be a submit button itself
-    el.click();
-    return { success: true, method: 'click' };
+
+    // 2. Visible submit / send button near the element
+    const submitCandidates = [
+      ...document.querySelectorAll('button[type="submit"], button[aria-label*="Send" i], button[aria-label*="Submit" i], button[aria-label*="Envoyer" i], button[data-testid*="send" i], button[data-testid*="submit" i]')
+    ].filter(b => {
+      const r = b.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && !b.disabled;
+    });
+    if (submitCandidates.length > 0) {
+      submitCandidates[0].click();
+      return { success: true, method: 'submit-button-nearby', selector: submitCandidates[0].getAttribute('aria-label') || submitCandidates[0].textContent.trim().slice(0, 40) };
+    }
+
+    // 3. Enter keydown on the element (SPA pattern — Grok, ChatGPT, etc.)
+    const enterOpts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    el.dispatchEvent(new KeyboardEvent('keydown', enterOpts));
+    el.dispatchEvent(new KeyboardEvent('keypress', enterOpts));
+    el.dispatchEvent(new KeyboardEvent('keyup', enterOpts));
+    return { success: true, method: 'enter-keydown' };
   },
 
   SCROLL_PAGE({ direction = 'down', amount = 500, selector } = {}) {
@@ -158,7 +213,7 @@ const handlers = {
   },
 
   GET_INTERACTIVE_ELEMENTS({ includeHidden = false } = {}) {
-    const INTERACTIVE = 'a[href], button, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [tabindex]';
+    const INTERACTIVE = 'a[href], button, input, select, textarea, [contenteditable], [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [role="textbox"], [role="combobox"], [tabindex]';
 
     function resolveLabel(el) {
       // 1. explicit <label for="id">
@@ -310,7 +365,7 @@ const handlers = {
     }
 
     // Key interactive elements with selectors — same logic as GET_INTERACTIVE_ELEMENTS but compact
-    const INTERACTIVE = 'button, input:not([type=hidden]), select, textarea, a[href], [role="button"], [role="tab"], [role="menuitem"]';
+    const INTERACTIVE = 'button, input:not([type=hidden]), select, textarea, [contenteditable], a[href], [role="button"], [role="tab"], [role="menuitem"], [role="textbox"], [role="combobox"]';
 
     function resolveLabel(el) {
       if (el.id) {
@@ -348,10 +403,12 @@ const handlers = {
       .slice(0, maxElements)
       .map(el => ({
         tag: el.tagName.toLowerCase(),
-        type: el.type || el.getAttribute('role') || null,
+        type: el.isContentEditable ? 'contenteditable' : (el.type || el.getAttribute('role') || null),
         selector: uniqueSelector(el),
         label: resolveLabel(el),
-        value: el.value !== undefined && el.value ? String(el.value).slice(0, 80) : null
+        value: el.isContentEditable
+          ? (el.innerText?.trim().slice(0, 80) || null)
+          : (el.value !== undefined && el.value ? String(el.value).slice(0, 80) : null)
       }));
 
     const rawText = textRoot?.innerText || '';
@@ -370,33 +427,56 @@ const handlers = {
     const el = document.querySelector(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
     el.focus();
+
+    const isContentEditable = el.isContentEditable;
+
     if (clearFirst) {
-      const setter = Object.getOwnPropertyDescriptor(
-        el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
-        'value'
-      )?.set;
-      if (setter) setter.call(el, '');
-      else el.value = '';
+      if (isContentEditable) {
+        el.innerHTML = '';
+      } else {
+        const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        if (setter) setter.call(el, '');
+        else el.value = '';
+      }
       el.dispatchEvent(new InputEvent('input', { bubbles: true }));
     }
-    for (const char of text) {
-      el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-      el.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
-      const setter = Object.getOwnPropertyDescriptor(
-        el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
-        'value'
-      )?.set;
-      if (setter) setter.call(el, el.value + char);
-      else el.value += char;
-      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
-      el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+
+    if (isContentEditable) {
+      // Use execCommand for contenteditable — fires all the right internal events
+      // that React/Vue listen to via their synthetic event system
+      const inserted = document.execCommand('insertText', false, text);
+      if (!inserted) {
+        // Fallback: set innerText and dispatch manually
+        el.innerText = (el.innerText || '') + text;
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+      }
+    } else {
+      // Standard input/textarea: type char by char so React state updates on each keystroke
+      const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      for (const char of text) {
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
+        const next = el.value + char;
+        if (setter) setter.call(el, next);
+        else el.value = next;
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
+        el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+      }
     }
+
     el.dispatchEvent(new Event('change', { bubbles: true }));
+
     if (pressEnter) {
-      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+      const enterOpts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+      el.dispatchEvent(new KeyboardEvent('keydown', enterOpts));
+      el.dispatchEvent(new KeyboardEvent('keypress', enterOpts));
+      el.dispatchEvent(new KeyboardEvent('keyup', enterOpts));
     }
-    return { success: true, typed: text.length, value: el.value.slice(0, 200) };
+
+    const finalValue = isContentEditable ? el.innerText.slice(0, 200) : el.value.slice(0, 200);
+    return { success: true, typed: text.length, value: finalValue };
   },
 
   PRESS_KEY({ selector, key, modifiers = [] } = {}) {

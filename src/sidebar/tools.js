@@ -303,24 +303,35 @@ export const browserTools = [
 
   {
     name: 'analyzePageVisually',
-    description: 'Take a screenshot of the visible page and analyze it using vision/OCR. Use this when: the page content cannot be extracted as text (canvas, image-based UI, PDF viewer, charts), you need to understand visual layout for form filling, or the user asks what they see on screen.',
+    description: 'Take a screenshot of the visible page and analyze it using vision/OCR. Use this when: the page content cannot be extracted as text (canvas, image-based UI, PDF viewer, charts), you need to understand visual layout for form filling, or the user asks what they see on screen. Automatically scoped to the active focus region if one is set.',
     parameters: {
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'What to focus on in the analysis, e.g. "find all form fields and their labels", "extract all text visible on screen", "describe the page layout". Defaults to a general OCR + layout description.' }
       }
     },
-    // _adapter is injected by lemura's ToolContext when tools are executed
     execute: async (p, context) => {
       const { adapter } = context ?? {};
       if (!adapter) throw new Error('Vision requires a provider adapter in tool context');
 
-      const imageBase64 = await captureTabScreenshot();
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 85 });
+      let imageBase64;
+
+      if (_focusRegion) {
+        const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: _focusRegion });
+        if (rectResult?.success && rectResult.rect?.pw > 0) {
+          imageBase64 = await cropScreenshot(dataUrl, rectResult.rect);
+        }
+      }
+      if (!imageBase64) {
+        imageBase64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      }
+
       const prompt = p?.prompt ||
         'Describe this web page screenshot in detail. Extract all visible text (OCR), identify form fields with their labels, buttons, and the overall layout structure. Be precise about element positions relative to each other.';
 
       const result = await adapter.describeImage({ imageBase64, prompt });
-      return { analysis: result.description, objects: result.objects };
+      return { analysis: result.description, objects: result.objects, focusRegion: _focusRegion || null };
     }
   },
 

@@ -202,15 +202,15 @@ const updatePickerUI = () => {
   }
 };
 
-const injectAndSend = async (action) => {
+const injectAndSend = async (action, extra = {}) => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
   try {
-    await chrome.tabs.sendMessage(tab.id, { action });
+    await chrome.tabs.sendMessage(tab.id, { action, ...extra });
   } catch {
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content/content-script.js'] });
     await new Promise(r => setTimeout(r, 150));
-    await chrome.tabs.sendMessage(tab.id, { action });
+    await chrome.tabs.sendMessage(tab.id, { action, ...extra });
   }
 };
 
@@ -229,6 +229,7 @@ const cancelPicker = async () => {
 const clearFocusRegion = async () => {
   setFocusRegion(null);
   updatePickerUI();
+  await injectAndSend('CLEAR_REGION_HIGHLIGHT').catch(() => {});
 };
 
 document.getElementById('btn-pick-region').addEventListener('click', () => {
@@ -245,6 +246,7 @@ chrome.runtime.onMessage.addListener(({ action, selector }) => {
     setFocusRegion(selector);
     updatePickerUI();
     showToast(`Focus region: ${selector}`);
+    injectAndSend('HIGHLIGHT_REGION', { selector }).catch(() => {});
     return;
   }
   if (action === 'REGION_PICK_CANCELLED') {
@@ -253,6 +255,9 @@ chrome.runtime.onMessage.addListener(({ action, selector }) => {
     return;
   }
   if (action !== 'TAB_CHANGED') return;
+  // Clear focus region when navigating to a new tab
+  setFocusRegion(null);
+  updatePickerUI();
   // Start a fresh session for the new tab — history from previous tab is irrelevant
   if (session) {
     try { session.reset(); } catch { /* ignore */ }

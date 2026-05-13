@@ -547,18 +547,36 @@ let _pickerOverlay = null;
 let _pickerHovered = null;
 
 function _pickerSelector(el) {
-  if (el.id) return `#${CSS.escape(el.id)}`;
-  if (el.getAttribute('data-testid')) return `[data-testid="${CSS.escape(el.getAttribute('data-testid'))}"]`;
-  const parts = [];
+  // Walk up to find the first ancestor with a stable unique identifier
   let node = el;
-  for (let i = 0; i < 5 && node && node !== document.documentElement; i++) {
+  for (let i = 0; i < 8 && node && node !== document.documentElement; i++, node = node.parentElement) {
+    if (node.id) return `#${CSS.escape(node.id)}`;
+    const testid = node.getAttribute('data-testid') || node.getAttribute('data-test-id') || node.getAttribute('data-cy');
+    if (testid) return `[data-testid="${CSS.escape(testid)}"]`;
+  }
+  // Build a short path using tag + meaningful classes, anchored at the nearest id ancestor
+  const parts = [];
+  node = el;
+  for (let i = 0; i < 6 && node && node !== document.documentElement; i++, node = node.parentElement) {
     const tag = node.tagName.toLowerCase();
+    const classes = Array.from(node.classList)
+      .filter(c => !/^(js-|is-|has-|ng-|v-|svelte-|css-|sc-)/.test(c) && c.length < 30)
+      .slice(0, 2)
+      .map(c => `.${CSS.escape(c)}`)
+      .join('');
+    const seg = `${tag}${classes}`;
+    // Check uniqueness — if this segment already identifies a unique element, stop
     const siblings = node.parentElement
       ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName)
       : [];
-    const idx = siblings.indexOf(node) + 1;
-    parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
-    node = node.parentElement;
+    const withNth = siblings.length > 1 ? `${seg}:nth-of-type(${siblings.indexOf(node) + 1})` : seg;
+    parts.unshift(withNth);
+    if (node.parentElement?.id) {
+      parts.unshift(`#${CSS.escape(node.parentElement.id)}`);
+      break;
+    }
+    // Stop early if the path so far is already unique
+    if (i >= 1 && document.querySelectorAll(parts.join(' > ')).length === 1) break;
   }
   return parts.join(' > ');
 }
@@ -638,13 +656,82 @@ function _exitPickMode() {
   _pickerHovered = null;
 }
 
+// ── Persistent region highlight ───────────────────────────────────────────────
+
+let _regionHighlight = null;
+let _regionHighlightSelector = null;
+let _regionHighlightObs = null;
+
+function _showRegionHighlight(selector) {
+  _clearRegionHighlight();
+  const el = selector ? document.querySelector(selector) : null;
+  if (!el) return;
+
+  _regionHighlightSelector = selector;
+
+  const badge = document.createElement('div');
+  Object.assign(badge.style, {
+    position: 'absolute', top: '0', left: '0',
+    background: '#6366f1', color: '#fff', fontSize: '10px', fontFamily: 'monospace',
+    padding: '1px 5px', borderRadius: '0 0 4px 0', pointerEvents: 'none',
+    whiteSpace: 'nowrap', maxWidth: '240px',
+    overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '16px'
+  });
+  badge.textContent = selector;
+
+  // Use fixed positioning — matches the picker overlay and requires no scroll math
+  _regionHighlight = document.createElement('div');
+  Object.assign(_regionHighlight.style, {
+    position: 'fixed', pointerEvents: 'none', zIndex: '2147483646',
+    border: '2px solid #6366f1', borderRadius: '3px',
+    background: 'rgba(99,102,241,0.08)',
+    boxShadow: '0 0 0 1px rgba(99,102,241,0.4)',
+  });
+  _regionHighlight.appendChild(badge);
+  document.documentElement.appendChild(_regionHighlight);
+
+  function reposition() {
+    const r = el.getBoundingClientRect();
+    Object.assign(_regionHighlight.style, {
+      top: `${r.top}px`,
+      left: `${r.left}px`,
+      width: `${r.width}px`,
+      height: `${r.height}px`
+    });
+  }
+
+  reposition();
+
+  _regionHighlightObs = new ResizeObserver(reposition);
+  _regionHighlightObs.observe(el);
+  window.addEventListener('scroll', reposition, { passive: true });
+  window.addEventListener('resize', reposition, { passive: true });
+  _regionHighlight._teardown = () => {
+    _regionHighlightObs?.disconnect();
+    window.removeEventListener('scroll', reposition);
+    window.removeEventListener('resize', reposition);
+  };
+}
+
+function _clearRegionHighlight() {
+  if (_regionHighlight) {
+    _regionHighlight._teardown?.();
+    _regionHighlight.remove();
+    _regionHighlight = null;
+  }
+  _regionHighlightObs = null;
+  _regionHighlightSelector = null;
+}
+
 // ── Message listener ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const { action, ...params } = message;
 
-  if (action === 'ENTER_PICK_MODE') { _enterPickMode(); sendResponse({ success: true }); return false; }
-  if (action === 'EXIT_PICK_MODE')  { _exitPickMode();  sendResponse({ success: true }); return false; }
+  if (action === 'ENTER_PICK_MODE')       { _enterPickMode(); sendResponse({ success: true }); return false; }
+  if (action === 'EXIT_PICK_MODE')        { _exitPickMode();  sendResponse({ success: true }); return false; }
+  if (action === 'HIGHLIGHT_REGION')      { _showRegionHighlight(params.selector); sendResponse({ success: true }); return false; }
+  if (action === 'CLEAR_REGION_HIGHLIGHT'){ _clearRegionHighlight(); sendResponse({ success: true }); return false; }
 
   const handler = handlers[action];
 

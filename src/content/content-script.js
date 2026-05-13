@@ -519,6 +519,82 @@ const handlers = {
     };
   },
 
+  async WRITE_TO_REGION({ rootSelector, text } = {}) {
+    const root = rootSelector ? document.querySelector(rootSelector) : document.body;
+    if (!root) return { success: false, error: `Region not found: ${rootSelector}` };
+
+    // Find the best editable target inside the region
+    const editable =
+      root.matches('[contenteditable]') ? root :
+      root.querySelector('[contenteditable="true"], [contenteditable=""]') ||
+      root.querySelector('textarea, input:not([type=hidden]):not([type=submit]):not([type=button])');
+
+    if (!editable) return { success: false, error: 'No editable element found in region' };
+
+    // Step 1 — click to activate the editor (required for Lexical/ProseMirror)
+    editable.scrollIntoView({ block: 'center' });
+    const r = editable.getBoundingClientRect();
+    const cx = Math.round(r.left + r.width / 2);
+    const cy = Math.round(r.top + r.height / 2);
+    const ptrOpts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+    editable.dispatchEvent(new PointerEvent('pointerdown', { ...ptrOpts, button: 0, buttons: 1 }));
+    editable.dispatchEvent(new MouseEvent('mousedown', { ...ptrOpts, button: 0, buttons: 1 }));
+    editable.dispatchEvent(new PointerEvent('pointerup', { ...ptrOpts, button: 0 }));
+    editable.dispatchEvent(new MouseEvent('mouseup', { ...ptrOpts, button: 0 }));
+    editable.click();
+    editable.focus();
+    await new Promise(r => setTimeout(r, 300));
+
+    // Step 2 — clear existing content
+    if (editable.isContentEditable) {
+      editable.innerHTML = '';
+    } else {
+      const proto = editable.tagName === 'TEXTAREA'
+        ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) setter.call(editable, '');
+      else editable.value = '';
+    }
+    editable.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 100));
+
+    // Step 3 — paste via clipboard (most reliable for Lexical/ProseMirror/rich editors)
+    try {
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      editable.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 200));
+      // Verify paste worked
+      const pasted = editable.isContentEditable ? editable.innerText : editable.value;
+      if (pasted.trim().length > 0) {
+        return { success: true, method: 'paste', selector: editable.id ? `#${editable.id}` : editable.tagName.toLowerCase(), preview: pasted.slice(0, 120) };
+      }
+    } catch (_) { /* fall through */ }
+
+    // Step 4 — fallback: execCommand insertText
+    const inserted = document.execCommand('insertText', false, text);
+    if (inserted) {
+      const val = editable.isContentEditable ? editable.innerText : editable.value;
+      return { success: true, method: 'execCommand', preview: val.slice(0, 120) };
+    }
+
+    // Step 5 — last resort: set innerText / value directly
+    if (editable.isContentEditable) {
+      editable.innerText = text;
+      editable.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+    } else {
+      const proto = editable.tagName === 'TEXTAREA'
+        ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) setter.call(editable, text);
+      else editable.value = text;
+      editable.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+    }
+    editable.dispatchEvent(new Event('change', { bubbles: true }));
+    const final = editable.isContentEditable ? editable.innerText : editable.value;
+    return { success: true, method: 'direct', preview: final.slice(0, 120) };
+  },
+
   WAIT_FOR_ELEMENT({ selector, timeoutMs = 5000 } = {}) {
     return new Promise((resolve) => {
       if (document.querySelector(selector)) {

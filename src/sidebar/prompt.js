@@ -35,6 +35,7 @@ Use this context as your starting orientation. You do NOT need to call getPageCo
 - analyzePageVisually → use when the page is image-based, canvas-rendered, or text extraction fails; also use to visually identify form fields and their spatial relationship before filling.
 - highlightElement → call this BEFORE fillForm/clickElement to show the user what you are about to act on.
 - fillForm, clickElement, submitForm, navigateTo → these require user confirmation; the UI will pause and ask.
+- When FOCUS REGION is active and the user asks to write/compose/draft: call writeToRegion with the focus region selector and generated text — never typeText, fillForm, or just print in chat.
 - scrollAndRead → use after navigating to a feed to load posts, AND whenever the user asks to read/analyze/summarize content that requires scrolling (comments, replies, threads, search results). Keep calling scrollAndRead in a loop until either: (a) you have collected enough content to fully answer the request, or (b) two consecutive scrolls return no new text. Do NOT stop after a single scroll and say "there are more comments" — keep going until you can give a complete answer.
 - Prefer IDs and data-attributes in CSS selectors over positional or class-based selectors.
 - After each action, verify the result before continuing.
@@ -57,7 +58,7 @@ export const buildMessageWithContext = (userText, ctx) => {
     : '(none)';
 
   const focusNote = ctx.focusRegion
-    ? `\n⚠ FOCUS REGION ACTIVE: "${ctx.focusRegion}" — All page text, DOM structure, and interactive elements below are scoped to this element only. When the user asks to read, summarize, or interact, operate within this region. Do NOT call getPageContent or any other tool on the full page — use the scoped text already provided here.`
+    ? `\n⚠ FOCUS REGION ACTIVE: "${ctx.focusRegion}" — The user has pinned this element as their working area. Rules:\n1. All page text, DOM structure, and interactive elements below are scoped to this element only.\n2. If the user asks to write, compose, draft, or fill — call writeToRegion(rootSelector="${ctx.focusRegion}", text="...") immediately. Do NOT use typeText or fillForm. Do NOT just show the text in chat.\n3. Do NOT call getPageContent or any other tool on the full page — use the scoped data already provided here.\n4. After writing, confirm what was written.`
     : '';
 
   const pageText = ctx.text

@@ -417,5 +417,19 @@ export const browserTools = [
       const result = await adapter.describeImage({ imageBase64, prompt });
       return { selector: p.selector, rect: rectResult.rect, analysis: result.description, objects: result.objects };
     }
+  },
+
+  {
+    name: 'writeToRegion',
+    description: 'Write text into the editable element (contenteditable, textarea, or input) inside a focus region. Use this — not typeText or fillForm — when a FOCUS REGION is active and the user asks to write, compose, draft, or fill content. Works reliably on complex rich-text editors (LinkedIn, Twitter, Notion, Slack).',
+    parameters: {
+      type: 'object',
+      properties: {
+        rootSelector: { type: 'string', description: 'CSS selector of the focus region container. Use the active focus region selector.' },
+        text: { type: 'string', description: 'The full text content to write into the editable element.' }
+      },
+      required: ['rootSelector', 'text']
+    },
+    execute: ({ rootSelector, text }) => sendToContentScript('WRITE_TO_REGION', { rootSelector, text })
   }
 ];

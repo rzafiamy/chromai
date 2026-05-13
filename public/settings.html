@@ -79,6 +79,16 @@
         </div>
 
         <div class="field">
+          <label for="visualContext">Visual Context</label>
+          <label class="toggle">
+            <input type="checkbox" id="visualContext">
+            <span class="toggle-track"></span>
+            <span>Inject a visual description into every message context</span>
+          </label>
+          <span class="hint">Takes a screenshot before each message and adds a brief scene description to the page context. Requires a vision-capable model. Adds latency.</span>
+        </div>
+
+        <div class="field">
           <label for="requestTimeout">Request Timeout (ms)</label>
           <input type="number" id="requestTimeout" min="5000" step="1000" placeholder="120000">
           <span class="hint">Per-request timeout in milliseconds — increase for slow/large models (default: 120000)</span>
@@ -87,6 +97,70 @@
         <div class="field">
           <label for="systemPrompt">Additional System Prompt <span class="optional">(optional)</span></label>
           <textarea id="systemPrompt" rows="4" placeholder="Additional instructions appended to the default system prompt…"></textarea>
+        </div>
+      </section>
+
+      <section>
+        <h2>Agent Behavior</h2>
+
+        <div class="field">
+          <label for="maxCompletionTokens">Max Completion Tokens</label>
+          <input type="number" id="maxCompletionTokens" min="256" step="256" placeholder="4096" value="4096">
+          <span class="hint">Maximum tokens the model can generate per reply (default: 4096)</span>
+        </div>
+
+        <div class="field">
+          <label for="maxTokensPerTool">Max Tokens per Tool Result</label>
+          <input type="number" id="maxTokensPerTool" min="256" step="256" placeholder="4000">
+          <span class="hint">Tool output is truncated to this many tokens before being fed back to the model (default: 4000)</span>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="goalInjectionFrequency">Goal Injection Frequency</label>
+            <select id="goalInjectionFrequency">
+              <option value="always">Always</option>
+              <option value="once">Once</option>
+              <option value="never">Never</option>
+            </select>
+            <span class="hint">How often the agent goal is re-injected during a session</span>
+          </div>
+          <div class="field">
+            <label for="goalInjectionPosition">Goal Injection Position</label>
+            <select id="goalInjectionPosition">
+              <option value="system_prompt">System prompt</option>
+              <option value="user_message">User message</option>
+            </select>
+            <span class="hint">Where the goal is injected — use "system prompt" for vLLM/Qwen</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Goal Planning</label>
+          <label class="toggle">
+            <input type="checkbox" id="enableGoalPlanning">
+            <span class="toggle-track"></span>
+            <span>Enable goal planning — keeps the agent focused on the original task</span>
+          </label>
+        </div>
+
+        <div class="field">
+          <label>Continuation Planning</label>
+          <label class="toggle">
+            <input type="checkbox" id="enableContinuationPlanning">
+            <span class="toggle-track"></span>
+            <span>Allow agent to self-extend when steps are exhausted</span>
+          </label>
+          <span class="hint">Disabled by default — injects a mid-conversation system message that vLLM/Qwen models reject</span>
+        </div>
+
+        <div class="field">
+          <label>Parallel Tool Calls</label>
+          <label class="toggle">
+            <input type="checkbox" id="parallelToolCalls">
+            <span class="toggle-track"></span>
+            <span>Allow the agent to call multiple tools simultaneously</span>
+          </label>
         </div>
       </section>
 

@@ -13,8 +13,16 @@ getSettings().then(settings => {
   document.getElementById('asrUrl').value = settings.asrUrl || '';
   document.getElementById('maxIterations').value = settings.maxIterations ?? 15;
   document.getElementById('maxSteps').value = settings.maxSteps ?? 30;
+  document.getElementById('maxCompletionTokens').value = settings.maxCompletionTokens ?? 4096;
+  document.getElementById('maxTokensPerTool').value = settings.maxTokensPerTool ?? 4000;
   document.getElementById('contextWindow').value = settings.contextWindow ?? 128000;
   document.getElementById('requestTimeout').value = settings.requestTimeout ?? 120000;
+  document.getElementById('visualContext').checked = settings.visualContext ?? false;
+  document.getElementById('enableGoalPlanning').checked = settings.enableGoalPlanning ?? true;
+  document.getElementById('enableContinuationPlanning').checked = settings.enableContinuationPlanning ?? false;
+  document.getElementById('parallelToolCalls').checked = settings.parallelToolCalls ?? true;
+  document.getElementById('goalInjectionFrequency').value = settings.goalInjectionFrequency ?? 'always';
+  document.getElementById('goalInjectionPosition').value = settings.goalInjectionPosition ?? 'system_prompt';
 });
 
 // ── Microphone permission UI ──
@@ -59,8 +67,16 @@ form.addEventListener('submit', async (e) => {
     asrUrl: document.getElementById('asrUrl').value.trim(),
     maxIterations: parseInt(document.getElementById('maxIterations').value, 10) || 15,
     maxSteps: parseInt(document.getElementById('maxSteps').value, 10) || 30,
+    maxCompletionTokens: parseInt(document.getElementById('maxCompletionTokens').value, 10) || 4096,
+    maxTokensPerTool: parseInt(document.getElementById('maxTokensPerTool').value, 10) || 4000,
     contextWindow: parseInt(document.getElementById('contextWindow').value, 10) || 128000,
-    requestTimeout: parseInt(document.getElementById('requestTimeout').value, 10) || 120000
+    requestTimeout: parseInt(document.getElementById('requestTimeout').value, 10) || 120000,
+    visualContext: document.getElementById('visualContext').checked,
+    enableGoalPlanning: document.getElementById('enableGoalPlanning').checked,
+    enableContinuationPlanning: document.getElementById('enableContinuationPlanning').checked,
+    parallelToolCalls: document.getElementById('parallelToolCalls').checked,
+    goalInjectionFrequency: document.getElementById('goalInjectionFrequency').value,
+    goalInjectionPosition: document.getElementById('goalInjectionPosition').value
   });
   statusMsg.classList.remove('hidden');
   setTimeout(() => statusMsg.classList.add('hidden'), 2500);

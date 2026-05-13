@@ -97,31 +97,28 @@ const makeAdapter = (settings) => {
   return adapter;
 };
 
+export const createAdapter = (settings) => makeAdapter(settings);
+
 export const createBrowserSession = ({ settings }) => new SessionManager({
   adapter: makeAdapter(settings),
   model: settings.model || 'gpt-4o-mini',
   maxTokens: settings.contextWindow || 128000,
-  // Set high enough that the maxSteps forced-conclusion path is never triggered —
-  // that path injects a mid-conversation system message which vLLM/Qwen rejects with HTTP 500.
-  maxIterations: settings.maxIterations || 20,
-  maxSteps: settings.maxSteps || 50,
-  maxCompletionTokens: 4096,
+  maxIterations: settings.maxIterations,
+  maxSteps: settings.maxSteps,
+  maxCompletionTokens: settings.maxCompletionTokens,
   tools: browserTools,
 
   media: { enableTools: true, toolPrefix: 'media_' },
 
-  // Must use 'system_prompt' position — vLLM models reject mid-conversation system messages.
-  enableGoalPlanning: true,
-  goalInjectionFrequency: 'always',
-  goalInjectionPosition: 'system_prompt',
+  enableGoalPlanning: settings.enableGoalPlanning,
+  goalInjectionFrequency: settings.goalInjectionFrequency,
+  goalInjectionPosition: settings.goalInjectionPosition,
+  enableContinuationPlanning: settings.enableContinuationPlanning,
 
-  // Disabled: continuation planning injects mid-conversation system messages on step exhaustion.
-  enableContinuationPlanning: false,
-
-  parallelToolCalls: true,
+  parallelToolCalls: settings.parallelToolCalls,
   toolFirewall: makeFirewall(),
   toolRegistryTimeoutMs: 30000,
-  maxTokensPerTool: 4000,
+  maxTokensPerTool: settings.maxTokensPerTool,
 
   systemPrompt: buildSystemPrompt(settings.systemPrompt),
   onTrace: makeTracer()

@@ -1,7 +1,7 @@
-import { createBrowserSession } from './agent.js';
+import { createBrowserSession, createAdapter } from './agent.js';
 import { getSettings } from './storage.js';
 import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge } from './ui.js';
-import { capturePageContext, setFocusRegion, getFocusRegion } from './tools.js';
+import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
 
 let session = null;
@@ -43,6 +43,21 @@ const handleSubmit = async (userText) => {
 
   try {
     const ctx = await capturePageContext();
+
+    if (ctx && currentSettings.visualContext) {
+      try {
+        const adapter = createAdapter(currentSettings);
+        const imageBase64 = await captureViewportBase64();
+        const result = await adapter.describeImage({
+          imageBase64,
+          prompt: 'Describe the visual scene of this web page in 2-3 sentences: layout, prominent UI elements, any modals or overlays, and the overall visual state. Be concise.'
+        });
+        ctx.visualDescription = result.description;
+      } catch {
+        // Visual context is best-effort — never block the message if it fails
+      }
+    }
+
     const message = ctx ? buildMessageWithContext(userText, ctx) : userText;
     // session.run() appends to context.turns — conversation history is preserved
     const response = await session.run(message);

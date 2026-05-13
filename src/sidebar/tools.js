@@ -61,6 +61,16 @@ const cropScreenshot = async (dataUrl, rect) => {
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 };
 
+export const captureViewportBase64 = async () => {
+  const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 75 });
+  if (!_focusRegion) return dataUrl.replace(/^data:image\/\w+;base64,/, '');
+  try {
+    const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: _focusRegion, scrollIntoView: false });
+    if (rectResult?.success && rectResult.rect?.pw > 0) return await cropScreenshot(dataUrl, rectResult.rect);
+  } catch { /* fall through to full viewport */ }
+  return dataUrl.replace(/^data:image\/\w+;base64,/, '');
+};
+
 const navigateTab = async (url) => {
   const tab = await getActiveTab();
 

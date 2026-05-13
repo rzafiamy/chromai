@@ -5,10 +5,18 @@ const DEFAULTS = {
   systemPrompt: '',
   maxIterations: 15,
   maxSteps: 30,
+  maxCompletionTokens: 4096,
   contextWindow: 16000,
   requestTimeout: 120000,
   visionModel: '',
-  asrUrl: ''
+  asrUrl: '',
+  visualContext: false,
+  enableGoalPlanning: true,
+  goalInjectionFrequency: 'always',
+  goalInjectionPosition: 'system_prompt',
+  enableContinuationPlanning: false,
+  parallelToolCalls: true,
+  maxTokensPerTool: 4000
 };
 
 export async function getSettings() {

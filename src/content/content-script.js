@@ -702,14 +702,28 @@ function _showRegionHighlight(selector) {
 
   reposition();
 
-  _regionHighlightObs = new ResizeObserver(reposition);
-  _regionHighlightObs.observe(el);
+  // Collect all scrollable ancestors (SPAs like LinkedIn scroll inner containers, not window)
+  const scrollParents = [];
+  let ancestor = el.parentElement;
+  while (ancestor && ancestor !== document.documentElement) {
+    const { overflow, overflowY, overflowX } = getComputedStyle(ancestor);
+    if (/auto|scroll/.test(overflow + overflowY + overflowX)) {
+      scrollParents.push(ancestor);
+      ancestor.addEventListener('scroll', reposition, { passive: true });
+    }
+    ancestor = ancestor.parentElement;
+  }
   window.addEventListener('scroll', reposition, { passive: true });
   window.addEventListener('resize', reposition, { passive: true });
+
+  _regionHighlightObs = new ResizeObserver(reposition);
+  _regionHighlightObs.observe(el);
+
   _regionHighlight._teardown = () => {
     _regionHighlightObs?.disconnect();
     window.removeEventListener('scroll', reposition);
     window.removeEventListener('resize', reposition);
+    scrollParents.forEach(p => p.removeEventListener('scroll', reposition));
   };
 }
 

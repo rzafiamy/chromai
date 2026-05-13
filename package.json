@@ -1,6 +1,6 @@
 {
   "name": "chromai",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "AI browser copilot Chrome extension using lemura agent framework",
   "type": "module",
   "scripts": {

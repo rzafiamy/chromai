@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.0-blueviolet?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.2.0-blueviolet?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/Powered%20By-Lemura-orange?style=for-the-badge" alt="Lemura">
 </p>
@@ -24,7 +24,10 @@ ChromAI is a Chrome extension that opens a sleek right sidebar with a sophistica
 - **🧠 Agentic Intelligence:** Uses a ReAct loop to think, plan, and execute multi-step tasks.
 - **🌐 Provider Agnostic:** Connect to any OpenAI-compatible endpoint (OpenAI, Groq, Together AI, Ollama, LM Studio, etc.).
 - **🛠️ Rich Toolset:** The agent can click, scroll, fill forms, extract data, and even wait for asynchronous elements.
-- **🔍 Visual Feedback:** Real-time highlighting of elements the agent is interacting with.
+- **🔍 Visual Feedback:** Real-time highlighting of elements the agent is interacting with, with a focus region picker for precise editing.
+- **🎙️ Voice Input:** Speak your prompts directly via microphone.
+- **📊 Markdown Rendering:** Chat responses support images and tables for richer output.
+- **🧭 Visual Context:** Goal planning and tool call display for full agent transparency.
 - **⚙️ Customizable:** Easy-to-use settings for API keys, model selection, and custom endpoints.
 
 ## 🛠 Browser Tools
@@ -36,10 +39,16 @@ The agent is equipped with a comprehensive set of tools to master the DOM:
 | **Read** | `getPageContent` | Captures visible text, page title, and current URL. |
 | | `getPageMeta` | Extracts SEO metadata (OpenGraph tags, descriptions, etc.). |
 | | `getSelectedText` | Retrieves text currently highlighted by the user. |
+| | `classifyPage` | Detects the type of page (article, product, forum, etc.). |
+| | `readThread` | Reads threaded content such as comments or forum posts. |
 | **Interact** | `clickElement` | Performs clicks on elements identified by CSS selectors. |
 | | `fillForm` | Populates input fields using native events (React/Vue compatible). |
 | | `submitForm` | Submits forms or triggers submit buttons. |
 | | `scrollPage` | Dynamic scrolling (up, down, or to specific elements). |
+| | `searchOnPage` | Performs an in-page text search. |
+| | `dismissOverlay` | Closes modals, cookie banners, and other overlays. |
+| | `findCommentBox` | Locates comment or reply input areas on the page. |
+| | `writeToRegion` | Writes content directly into a focused editing region. |
 | **Data** | `extractLinks` | Gathers all links or scoped links from a specific section. |
 | | `extractTable` | Parses structured table data into machine-readable formats. |
 | **Control** | `highlightElement` | Visually outlines elements to show agent focus. |

@@ -27,6 +27,10 @@ const renderMarkdown = (text) => {
   text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
   // Strikethrough
   text = text.replace(/~~(.+?)~~/g, '<del>$1</del>');
+  // Images (before links so ![...](...) isn't swallowed by the link regex)
+  text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) =>
+    `<a href="${src}" target="_blank" rel="noopener" class="md-img-link"><img src="${src}" alt="${escapeHtml(alt)}" class="md-img" loading="lazy"></a>`
+  );
   // Links
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="md-link">$1</a>');
   // Unordered lists
@@ -39,12 +43,35 @@ const renderMarkdown = (text) => {
     const items = block.trim().split('\n').map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`).join('');
     return `<ol class="md-ol">${items}</ol>`;
   });
+  // Tables (GFM style: header row | separator row | data rows)
+  text = text.replace(/((?:^(?:\|[^\n]+\|)\n)+)/gm, (block) => {
+    const lines = block.trim().split('\n').filter(l => l.trim());
+    if (lines.length < 2) return block;
+    const isSep = (l) => /^\|?[\s\-:|]+\|/.test(l);
+    // Find separator row index
+    const sepIdx = lines.findIndex(isSep);
+    if (sepIdx < 1) return block;
+    const parseRow = (l) => l.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    const aligns = parseRow(lines[sepIdx]).map(c => {
+      if (/^:-+:$/.test(c)) return 'center';
+      if (/^-+:$/.test(c)) return 'right';
+      return 'left';
+    });
+    const headerCells = parseRow(lines[0]).map((c, i) =>
+      `<th style="text-align:${aligns[i] || 'left'}">${c}</th>`).join('');
+    const bodyRows = lines.slice(sepIdx + 1).map(l => {
+      const cells = parseRow(l).map((c, i) =>
+        `<td style="text-align:${aligns[i] || 'left'}">${c}</td>`).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+    return `<div class="md-table-wrap"><table class="md-table"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+  });
   // Blockquote
   text = text.replace(/^> (.+)$/gm, '<blockquote class="md-blockquote">$1</blockquote>');
   // Horizontal rule
   text = text.replace(/^---$/gm, '<hr class="md-hr">');
   // Newlines (preserve existing block tags)
-  text = text.replace(/\n(?!<\/?(?:ul|ol|li|pre|h[1-6]|blockquote|hr|div))/g, '<br>');
+  text = text.replace(/\n(?!<\/?(?:ul|ol|li|pre|h[1-6]|blockquote|hr|div|table|thead|tbody|tr|td|th))/g, '<br>');
   return text;
 };
 

@@ -1,12 +1,13 @@
 import { createBrowserSession } from './agent.js';
 import { getSettings } from './storage.js';
 import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge } from './ui.js';
-import { capturePageContext } from './tools.js';
+import { capturePageContext, setFocusRegion, getFocusRegion } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
 
 let session = null;
 let isRunning = false;
 let currentSettings = null;
+let isPickerActive = false;
 
 const initSession = async () => {
   currentSettings = await getSettings();
@@ -167,16 +168,90 @@ document.getElementById('btn-mic').addEventListener('click', () => {
   }
 });
 
-// Welcome chip quick-prompts
+// Welcome chip quick-prompts + Continue button
 document.getElementById('messages').addEventListener('click', (e) => {
   const chip = e.target.closest('.welcome-chip');
-  if (!chip) return;
-  const prompt = chip.dataset.prompt;
-  if (prompt) handleSubmit(prompt);
+  if (chip) {
+    const prompt = chip.dataset.prompt;
+    if (prompt) handleSubmit(prompt);
+    return;
+  }
+  // Continue button — injected by showStopReason in ui.js
+  if (e.target.id === 'trace-continue-btn') {
+    e.target.closest('.trace-stop')?.remove();
+    handleSubmit('Continue from where you left off. Complete the task.');
+  }
 });
 
+// ── Element picker ──
+
+const updatePickerUI = () => {
+  const btn = document.getElementById('btn-pick-region');
+  const pill = document.getElementById('focus-region-pill');
+  const pillText = document.getElementById('focus-region-text');
+  const region = getFocusRegion();
+
+  btn.classList.toggle('picker-active', isPickerActive);
+  btn.title = isPickerActive ? 'Cancel region pick (Esc)' : 'Pick focus region';
+
+  if (region) {
+    pill.style.display = 'flex';
+    pillText.textContent = region;
+  } else {
+    pill.style.display = 'none';
+  }
+};
+
+const injectAndSend = async (action) => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  try {
+    await chrome.tabs.sendMessage(tab.id, { action });
+  } catch {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content/content-script.js'] });
+    await new Promise(r => setTimeout(r, 150));
+    await chrome.tabs.sendMessage(tab.id, { action });
+  }
+};
+
+const startPicker = async () => {
+  isPickerActive = true;
+  updatePickerUI();
+  await injectAndSend('ENTER_PICK_MODE');
+};
+
+const cancelPicker = async () => {
+  isPickerActive = false;
+  updatePickerUI();
+  await injectAndSend('EXIT_PICK_MODE');
+};
+
+const clearFocusRegion = async () => {
+  setFocusRegion(null);
+  updatePickerUI();
+};
+
+document.getElementById('btn-pick-region').addEventListener('click', () => {
+  if (isPickerActive) cancelPicker();
+  else startPicker();
+});
+
+document.getElementById('btn-clear-region').addEventListener('click', clearFocusRegion);
+
 // Tab change: reset session but preserve UI
-chrome.runtime.onMessage.addListener(({ action }) => {
+chrome.runtime.onMessage.addListener(({ action, selector }) => {
+  if (action === 'REGION_PICKED') {
+    isPickerActive = false;
+    setFocusRegion(selector);
+    updatePickerUI();
+    showToast(`Focus region: ${selector}`);
+    return;
+  }
+  if (action === 'REGION_PICK_CANCELLED') {
+    isPickerActive = false;
+    updatePickerUI();
+    return;
+  }
   if (action !== 'TAB_CHANGED') return;
   // Start a fresh session for the new tab — history from previous tab is irrelevant
   if (session) {

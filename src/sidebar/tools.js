@@ -1,6 +1,12 @@
 // Browser tool definitions for the lemura agent.
 // Each tool sends a message to the content script running in the active tab.
 
+// Global focus region — set by the element picker in the sidebar.
+// When non-null, content-reading tools scope their results to this CSS selector.
+let _focusRegion = null;
+export const setFocusRegion = (selector) => { _focusRegion = selector; };
+export const getFocusRegion = () => _focusRegion;
+
 const getActiveTab = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error('No active tab found');
@@ -42,8 +48,32 @@ const captureTabScreenshot = async () => {
   return dataUrl.replace(/^data:image\/\w+;base64,/, '');
 };
 
+// Crop a base64 JPEG/PNG to the given rect using an OffscreenCanvas
+const cropScreenshot = async (dataUrl, rect) => {
+  const blob = await fetch(dataUrl).then(r => r.blob());
+  const bitmap = await createImageBitmap(blob);
+  const { px, py, pw, ph } = rect;
+  const canvas = new OffscreenCanvas(pw, ph);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, px, py, pw, ph, 0, 0, pw, ph);
+  const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
+  const buf = await outBlob.arrayBuffer();
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+};
+
 const navigateTab = async (url) => {
   const tab = await getActiveTab();
+
+  // Block navigation to a different origin than the current tab.
+  const currentOrigin = new URL(tab.url).origin;
+  const targetOrigin = new URL(url).origin;
+  if (currentOrigin !== targetOrigin) {
+    throw new Error(
+      `Navigation blocked: cannot leave the current site (${currentOrigin}). ` +
+      `Requested URL is on a different origin (${targetOrigin}).`
+    );
+  }
+
   await chrome.tabs.update(tab.id, { url });
   await new Promise((resolve) => {
     const timeout = setTimeout(() => {
@@ -65,21 +95,22 @@ const navigateTab = async (url) => {
 export const capturePageContext = async () => {
   try {
     const tab = await getActiveTab();
+    const payload = { action: 'GET_PAGE_CONTEXT', rootSelector: _focusRegion || undefined };
     const ask = () => new Promise((resolve) => {
-      chrome.tabs.sendMessage(tab.id, { action: 'GET_PAGE_CONTEXT' }, (response) => {
+      chrome.tabs.sendMessage(tab.id, payload, (response) => {
         const errMsg = chrome.runtime.lastError?.message;
         if (errMsg || !response?.success) { resolve({ error: errMsg }); return; }
         resolve({ data: response.data });
       });
     });
     const first = await ask();
-    if (first.data !== undefined) return first.data;
+    if (first.data !== undefined) return { ...first.data, focusRegion: _focusRegion };
     if (!isNoReceiverError(first.error)) return null;
     // Content script missing — inject and retry once.
     await injectContentScript(tab.id);
     await new Promise((r) => setTimeout(r, 200));
     const retry = await ask();
-    return retry.data ?? null;
+    return retry.data ? { ...retry.data, focusRegion: _focusRegion } : null;
   } catch {
     return null;
   }
@@ -88,14 +119,15 @@ export const capturePageContext = async () => {
 export const browserTools = [
   {
     name: 'getPageContent',
-    description: 'Get the visible text content of the current web page, including its title and URL. Use this first to understand the page before taking actions.',
+    description: 'Get the visible text content of the current web page, including its title and URL. Use this first to understand the page before taking actions. Optionally scope to a DOM subtree with rootSelector.',
     parameters: {
       type: 'object',
       properties: {
-        maxLength: { type: 'number', description: 'Maximum characters to return (default 12000)' }
+        maxLength: { type: 'number', description: 'Maximum characters to return (default 12000)' },
+        rootSelector: { type: 'string', description: 'CSS selector of the root element to read from (e.g. "main", "#content", ".article-body"). Omit to read the whole page.' }
       }
     },
-    execute: (p) => sendToContentScript('GET_PAGE_CONTENT', { maxLength: p?.maxLength || 12000 })
+    execute: (p) => sendToContentScript('GET_PAGE_CONTENT', { maxLength: p?.maxLength || 12000, rootSelector: p?.rootSelector ?? _focusRegion })
   },
 
   {
@@ -122,7 +154,7 @@ export const browserTools = [
         limit: { type: 'number', description: 'Maximum number of links to return (default 50)' }
       }
     },
-    execute: (p) => sendToContentScript('EXTRACT_LINKS', { selector: p?.selector, limit: p?.limit || 50 })
+    execute: (p) => sendToContentScript('EXTRACT_LINKS', { selector: p?.selector ?? _focusRegion, limit: p?.limit || 50 })
   },
 
   {
@@ -308,5 +340,71 @@ export const browserTools = [
       waitMs: p?.waitMs || 1200,
       maxLength: p?.maxLength || 12000
     })
+  },
+
+  {
+    name: 'typeText',
+    description: 'Type text into a focused input, textarea, or contenteditable element character-by-character, firing real keyboard and input events. Use this when fillForm fails on complex editors (CodeMirror, ProseMirror, rich-text fields). Can optionally clear the field first and press Enter at the end.',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector of the element to type into' },
+        text: { type: 'string', description: 'Text to type' },
+        clearFirst: { type: 'boolean', description: 'Clear the current value before typing (default false)' },
+        pressEnter: { type: 'boolean', description: 'Press Enter key after typing (default false)' }
+      },
+      required: ['selector', 'text']
+    },
+    execute: ({ selector, text, clearFirst = false, pressEnter = false }) =>
+      sendToContentScript('TYPE_TEXT', { selector, text, clearFirst, pressEnter })
+  },
+
+  {
+    name: 'pressKey',
+    description: 'Dispatch a keyboard event on an element or the currently focused element. Use for hotkeys, Escape, Tab, arrow keys, or any key combination.',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector of target element. Omit to fire on the currently active element.' },
+        key: { type: 'string', description: 'Key value (e.g. "Enter", "Escape", "Tab", "ArrowDown", "a")' },
+        modifiers: {
+          type: 'array',
+          description: 'Modifier keys to hold (e.g. ["ctrl"], ["shift", "alt"])',
+          items: { type: 'string', enum: ['ctrl', 'shift', 'alt', 'meta'] }
+        }
+      },
+      required: ['key']
+    },
+    execute: ({ selector, key, modifiers = [] }) =>
+      sendToContentScript('PRESS_KEY', { selector, key, modifiers })
+  },
+
+  {
+    name: 'captureRegion',
+    description: 'Take a screenshot of a specific element or region on the page and analyze it with vision. Useful for charts, image-based UI sections, or any area the user wants to examine visually without processing the whole page.',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector of the element to capture (e.g. "#chart", ".hero-image", "table.results")' },
+        prompt: { type: 'string', description: 'What to look for or extract from the captured region.' }
+      },
+      required: ['selector']
+    },
+    execute: async (p, context) => {
+      const { adapter } = context ?? {};
+      if (!adapter) throw new Error('Vision requires a provider adapter in tool context');
+
+      const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: p.selector });
+      if (!rectResult.success) throw new Error(rectResult.error);
+
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 90 });
+      const imageBase64 = await cropScreenshot(dataUrl, rectResult.rect);
+
+      const prompt = p.prompt ||
+        'Describe what you see in this element: extract all visible text, identify any charts or data, and describe the visual structure.';
+
+      const result = await adapter.describeImage({ imageBase64, prompt });
+      return { selector: p.selector, rect: rectResult.rect, analysis: result.description, objects: result.objects };
+    }
   }
 ];

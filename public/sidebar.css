@@ -110,6 +110,50 @@ html, body {
 }
 .icon-btn:hover { background: var(--bg3); color: var(--text); }
 
+.icon-btn.picker-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  animation: picker-pulse 1.2s ease-in-out infinite;
+}
+@keyframes picker-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.4); }
+  50%       { box-shadow: 0 0 0 4px rgba(99,102,241,0); }
+}
+
+/* ── Focus region pill ── */
+#focus-region-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 4px 10px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid rgba(99,102,241,0.2);
+  color: var(--accent-hover);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  min-width: 0;
+}
+#focus-region-pill svg { flex-shrink: 0; opacity: 0.7; }
+#focus-region-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#btn-clear-region {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--accent-hover);
+  font-size: 12px;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+#btn-clear-region:hover { opacity: 1; }
+
 /* ── Chat container ── */
 #chat-container {
   flex: 1;
@@ -631,3 +675,124 @@ code.inline-code {
 .confirm-btn:hover { opacity: 0.82; }
 .confirm-cancel { background: var(--bg4); color: var(--text); border: 1px solid var(--border); }
 .confirm-ok { background: linear-gradient(135deg, var(--accent), var(--purple)); color: white; }
+
+/* ── Agent traceability ────────────────────────────────────────────────────── */
+
+/* Iteration step badge */
+.trace-iteration {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  margin: 6px 0 2px;
+}
+.trace-iter-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  border-left: 2px solid var(--border-light);
+  padding-left: 7px;
+}
+.trace-continuation-badge {
+  font-size: 10px;
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 1px 7px;
+  margin-left: 6px;
+}
+
+/* Thinking / reasoning preview */
+.trace-thinking {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 1px 10px 3px 14px;
+  padding: 6px 10px;
+  background: var(--bg2);
+  border-left: 2px solid var(--border-light);
+  border-radius: 0 6px 6px 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+.trace-thinking-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.5;
+}
+.trace-thinking-text { flex: 1; word-break: break-word; }
+.trace-ellipsis { opacity: 0.5; }
+.trace-expand-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--accent-hover);
+  font-size: 10px;
+  padding: 0 2px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  align-self: flex-end;
+  font-family: var(--font);
+}
+.trace-expand-btn:hover { text-decoration: underline; }
+
+/* Stop reason banner */
+.trace-stop {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 10px 4px;
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+.trace-stop-warning {
+  background: rgba(245,158,11,0.08);
+  border: 1px solid rgba(245,158,11,0.25);
+  color: var(--warning);
+}
+.trace-stop-error {
+  background: rgba(248,113,113,0.08);
+  border: 1px solid rgba(248,113,113,0.25);
+  color: var(--error);
+}
+.trace-stop-icon { flex-shrink: 0; }
+.trace-stop-label { font-weight: 600; }
+.trace-stop-detail {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  flex-basis: 100%;
+  padding-left: 18px;
+  margin-top: -2px;
+}
+.trace-continue-btn {
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  font-family: var(--font);
+  margin-left: auto;
+  transition: opacity 0.15s;
+}
+.trace-continue-btn:hover { opacity: 0.85; }
+
+/* Firewall blocked */
+.trace-blocked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 10px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--error);
+  opacity: 0.7;
+}

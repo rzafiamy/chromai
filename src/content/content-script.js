@@ -5,19 +5,25 @@ const MAX_TEXT_LENGTH = 15000;
 const MAX_HTML_LENGTH = 30000;
 
 const handlers = {
-  GET_PAGE_CONTENT({ maxLength = MAX_TEXT_LENGTH } = {}) {
-    const text = (document.body?.innerText || '').slice(0, maxLength);
+  GET_PAGE_CONTENT({ maxLength = MAX_TEXT_LENGTH, rootSelector } = {}) {
+    const root = rootSelector ? document.querySelector(rootSelector) : document.body;
+    if (rootSelector && !root) return { error: `Selector not found: ${rootSelector}` };
+    const rawText = root?.innerText || '';
+    const text = rawText.slice(0, maxLength);
     return {
       title: document.title,
       url: location.href,
+      rootSelector: rootSelector || null,
       text,
-      truncated: (document.body?.innerText || '').length > maxLength
+      truncated: rawText.length > maxLength
     };
   },
 
-  GET_PAGE_HTML({ maxLength = MAX_HTML_LENGTH } = {}) {
-    const html = document.documentElement.outerHTML.slice(0, maxLength);
-    return { html, title: document.title, url: location.href };
+  GET_PAGE_HTML({ maxLength = MAX_HTML_LENGTH, rootSelector } = {}) {
+    const root = rootSelector ? document.querySelector(rootSelector) : document.documentElement;
+    if (rootSelector && !root) return { error: `Selector not found: ${rootSelector}` };
+    const html = (root?.outerHTML || '').slice(0, maxLength);
+    return { html, title: document.title, url: location.href, rootSelector: rootSelector || null };
   },
 
   GET_SELECTED_TEXT() {
@@ -285,10 +291,14 @@ const handlers = {
     return { forms, orphanInputs };
   },
 
-  GET_PAGE_CONTEXT({ textLength = 4000, maxElements = 40 } = {}) {
+  GET_PAGE_CONTEXT({ textLength = 4000, maxElements = 40, rootSelector } = {}) {
+    const root = rootSelector ? document.querySelector(rootSelector) : null;
+    if (rootSelector && !root) return { error: `Focus region not found: ${rootSelector}` };
+    const textRoot = root || document.body;
+
     // Compact DOM structure: headings + landmark roles to give shape without noise
     function domSummary() {
-      const landmarks = Array.from(document.querySelectorAll(
+      const landmarks = Array.from((root || document).querySelectorAll(
         'h1,h2,h3,nav,main,header,footer,aside,section,article,[role="main"],[role="navigation"],[role="search"]'
       )).slice(0, 30).map(el => {
         const tag = el.tagName.toLowerCase();
@@ -328,7 +338,7 @@ const handlers = {
       return parts.join(' > ');
     }
 
-    const elements = Array.from(document.querySelectorAll(INTERACTIVE))
+    const elements = Array.from((root || document).querySelectorAll(INTERACTIVE))
       .filter(el => {
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return false;
@@ -344,13 +354,88 @@ const handlers = {
         value: el.value !== undefined && el.value ? String(el.value).slice(0, 80) : null
       }));
 
+    const rawText = textRoot?.innerText || '';
     return {
       url: location.href,
       title: document.title,
-      text: (document.body?.innerText || '').slice(0, textLength),
-      textTruncated: (document.body?.innerText || '').length > textLength,
+      focusRegion: rootSelector || null,
+      text: rawText.slice(0, textLength),
+      textTruncated: rawText.length > textLength,
       domSummary: domSummary(),
       interactiveElements: elements
+    };
+  },
+
+  async TYPE_TEXT({ selector, text, clearFirst = false, pressEnter = false } = {}) {
+    const el = document.querySelector(selector);
+    if (!el) return { success: false, error: `Element not found: ${selector}` };
+    el.focus();
+    if (clearFirst) {
+      const setter = Object.getOwnPropertyDescriptor(
+        el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
+        'value'
+      )?.set;
+      if (setter) setter.call(el, '');
+      else el.value = '';
+      el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
+    for (const char of text) {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+      el.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
+      const setter = Object.getOwnPropertyDescriptor(
+        el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
+        'value'
+      )?.set;
+      if (setter) setter.call(el, el.value + char);
+      else el.value += char;
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+    }
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (pressEnter) {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+    }
+    return { success: true, typed: text.length, value: el.value.slice(0, 200) };
+  },
+
+  PRESS_KEY({ selector, key, modifiers = [] } = {}) {
+    const target = selector ? document.querySelector(selector) : document.activeElement;
+    if (selector && !target) return { success: false, error: `Element not found: ${selector}` };
+    const opts = {
+      key,
+      code: key,
+      bubbles: true,
+      ctrlKey: modifiers.includes('ctrl'),
+      shiftKey: modifiers.includes('shift'),
+      altKey: modifiers.includes('alt'),
+      metaKey: modifiers.includes('meta')
+    };
+    target.dispatchEvent(new KeyboardEvent('keydown', opts));
+    target.dispatchEvent(new KeyboardEvent('keyup', opts));
+    return { success: true, key, target: target.tagName };
+  },
+
+  GET_ELEMENT_RECT({ selector } = {}) {
+    const el = document.querySelector(selector);
+    if (!el) return { success: false, error: `Element not found: ${selector}` };
+    const r = el.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    return {
+      success: true,
+      selector,
+      rect: {
+        x: Math.round(r.x),
+        y: Math.round(r.y),
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+        devicePixelRatio: dpr,
+        // Physical pixel coords for screenshot cropping
+        px: Math.round(r.x * dpr),
+        py: Math.round(r.y * dpr),
+        pw: Math.round(r.width * dpr),
+        ph: Math.round(r.height * dpr)
+      }
     };
   },
 
@@ -375,8 +460,112 @@ const handlers = {
   }
 };
 
+// ── Element picker (inspector mode) ──────────────────────────────────────────
+
+let _pickerActive = false;
+let _pickerOverlay = null;
+let _pickerHovered = null;
+
+function _pickerSelector(el) {
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  if (el.getAttribute('data-testid')) return `[data-testid="${CSS.escape(el.getAttribute('data-testid'))}"]`;
+  const parts = [];
+  let node = el;
+  for (let i = 0; i < 5 && node && node !== document.documentElement; i++) {
+    const tag = node.tagName.toLowerCase();
+    const siblings = node.parentElement
+      ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName)
+      : [];
+    const idx = siblings.indexOf(node) + 1;
+    parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
+    node = node.parentElement;
+  }
+  return parts.join(' > ');
+}
+
+function _enterPickMode() {
+  if (_pickerActive) return;
+  _pickerActive = true;
+
+  _pickerOverlay = document.createElement('div');
+  Object.assign(_pickerOverlay.style, {
+    position: 'fixed', pointerEvents: 'none', zIndex: '2147483647',
+    border: '2px solid #6366f1', borderRadius: '3px',
+    background: 'rgba(99,102,241,0.08)', transition: 'all 0.08s ease',
+    boxShadow: '0 0 0 1px rgba(99,102,241,0.4)',
+    display: 'none'
+  });
+
+  const _pickerLabel = document.createElement('div');
+  Object.assign(_pickerLabel.style, {
+    position: 'absolute', bottom: '100%', left: '0', marginBottom: '4px',
+    background: '#6366f1', color: '#fff', fontSize: '11px', fontFamily: 'monospace',
+    padding: '2px 6px', borderRadius: '3px', whiteSpace: 'nowrap',
+    pointerEvents: 'none', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis'
+  });
+  _pickerOverlay.appendChild(_pickerLabel);
+  document.documentElement.appendChild(_pickerOverlay);
+
+  document.documentElement.style.cursor = 'crosshair';
+
+  const onMove = (e) => {
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || el === _pickerOverlay) return;
+    _pickerHovered = el;
+    const r = el.getBoundingClientRect();
+    Object.assign(_pickerOverlay.style, {
+      display: 'block',
+      top: `${r.top}px`, left: `${r.left}px`,
+      width: `${r.width}px`, height: `${r.height}px`
+    });
+    _pickerLabel.textContent = _pickerSelector(el);
+  };
+
+  const onClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!_pickerHovered) return;
+    const selector = _pickerSelector(_pickerHovered);
+    _exitPickMode();
+    chrome.runtime.sendMessage({ action: 'REGION_PICKED', selector });
+  };
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') { _exitPickMode(); chrome.runtime.sendMessage({ action: 'REGION_PICK_CANCELLED' }); }
+  };
+
+  document.addEventListener('mousemove', onMove, true);
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('keydown', onKey, true);
+
+  // Store cleanup refs on the overlay element
+  _pickerOverlay._cleanup = () => {
+    document.removeEventListener('mousemove', onMove, true);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+}
+
+function _exitPickMode() {
+  if (!_pickerActive) return;
+  _pickerActive = false;
+  document.documentElement.style.cursor = '';
+  if (_pickerOverlay) {
+    _pickerOverlay._cleanup?.();
+    _pickerOverlay.remove();
+    _pickerOverlay = null;
+  }
+  _pickerHovered = null;
+}
+
+// ── Message listener ──────────────────────────────────────────────────────────
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const { action, ...params } = message;
+
+  if (action === 'ENTER_PICK_MODE') { _enterPickMode(); sendResponse({ success: true }); return false; }
+  if (action === 'EXIT_PICK_MODE')  { _exitPickMode();  sendResponse({ success: true }); return false; }
+
   const handler = handlers[action];
 
   if (!handler) {

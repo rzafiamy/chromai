@@ -225,6 +225,104 @@ export const resolveToolActivity = (div) => {
   div.classList.add('tool-activity-done');
 };
 
+// ── Agent traceability ─────────────────────────────────────────────────────
+
+export const showIterationBadge = (iteration) => {
+  if (iteration == null) return null;
+  const container = messagesEl();
+  const div = document.createElement('div');
+  div.className = 'trace-iteration';
+  div.innerHTML = `<span class="trace-iter-label">Step ${iteration}</span>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+};
+
+export const showThinkingText = (text) => {
+  if (!text?.trim()) return null;
+  const container = messagesEl();
+  const div = document.createElement('div');
+  div.className = 'trace-thinking';
+  // Show a truncated preview — full text appears on expand
+  const preview = text.trim().slice(0, 280);
+  const isTruncated = text.trim().length > 280;
+  div.innerHTML = `
+    <span class="trace-thinking-icon">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+      </svg>
+    </span>
+    <span class="trace-thinking-text">${escapeHtml(preview)}${isTruncated ? '<span class="trace-ellipsis">…</span>' : ''}</span>
+    ${isTruncated ? `<button class="trace-expand-btn" data-full="${escapeHtml(text.trim())}">Show more</button>` : ''}`;
+  div.querySelector('.trace-expand-btn')?.addEventListener('click', (e) => {
+    const btn = e.currentTarget;
+    const textEl = div.querySelector('.trace-thinking-text');
+    if (btn.dataset.expanded) {
+      textEl.textContent = preview;
+      textEl.insertAdjacentHTML('beforeend', '<span class="trace-ellipsis">…</span>');
+      btn.textContent = 'Show more';
+      delete btn.dataset.expanded;
+    } else {
+      textEl.textContent = btn.dataset.full;
+      btn.textContent = 'Show less';
+      btn.dataset.expanded = '1';
+    }
+  });
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+};
+
+const STOP_REASON_LABELS = {
+  stop: { label: 'Stopped', detail: 'The model stopped without requesting another tool call. If the task is incomplete, use Continue.', color: 'warning' },
+  max_tokens: { label: 'Token limit reached', detail: 'The model ran out of output tokens mid-response.', color: 'error' },
+  length: { label: 'Token limit reached', detail: 'The model ran out of output tokens mid-response.', color: 'error' },
+  max_steps: { label: 'Step limit reached', detail: 'The agent hit the maximum number of tool calls per run.', color: 'error' },
+  max_iterations: { label: 'Iteration limit reached', detail: 'The agent hit the maximum number of LLM iterations.', color: 'error' },
+  error: { label: 'Error', detail: 'The model returned an error finish reason.', color: 'error' }
+};
+
+export const showStopReason = (reason, _thinkingDiv) => {
+  const info = STOP_REASON_LABELS[reason] ?? { label: reason, detail: '', color: 'warning' };
+  const container = messagesEl();
+  const div = document.createElement('div');
+  div.className = `trace-stop trace-stop-${info.color}`;
+
+  const isRecoverable = reason === 'stop' || reason === 'max_steps' || reason === 'max_iterations';
+
+  div.innerHTML = `
+    <span class="trace-stop-icon">
+      ${info.color === 'error'
+        ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
+        : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/></svg>`
+      }
+    </span>
+    <span class="trace-stop-label">${escapeHtml(info.label)}</span>
+    ${info.detail ? `<span class="trace-stop-detail">${escapeHtml(info.detail)}</span>` : ''}
+    ${isRecoverable ? `<button class="trace-continue-btn" id="trace-continue-btn">Continue</button>` : ''}`;
+
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+};
+
+export const markContinuation = (iterDiv, action) => {
+  if (!iterDiv) return;
+  const badge = document.createElement('span');
+  badge.className = 'trace-continuation-badge';
+  badge.textContent = action ? `↻ ${action}` : '↻ continuing';
+  iterDiv.appendChild(badge);
+};
+
+export const showBlockedBadge = (toolName) => {
+  const container = messagesEl();
+  const div = document.createElement('div');
+  div.className = 'trace-blocked';
+  div.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> <span>${escapeHtml(toolName)} blocked by firewall</span>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+};
+
 export const updateModelBadge = (model) => {
   const badge = document.getElementById('model-badge');
   if (badge) badge.textContent = model || '';

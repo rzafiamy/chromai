@@ -49,26 +49,30 @@ Today's date: ${new Date().toISOString().split('T')[0]}.${customSystem ? `\n\n${
 export const buildMessageWithContext = (userText, ctx) => {
   const date = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 
-  const elementsText = ctx.interactiveElements.length > 0
+  const elementsText = ctx.interactiveElements?.length > 0
     ? ctx.interactiveElements.map(({ tag, type, selector, label, value }) => {
         const parts = [tag, type ? `[${type}]` : '', ` selector="${selector}"`, label ? ` label="${label}"` : '', value ? ` value="${value}"` : ''];
         return parts.join('');
       }).join('\n')
     : '(none)';
 
+  const focusNote = ctx.focusRegion
+    ? `\n⚠ FOCUS REGION ACTIVE: "${ctx.focusRegion}" — All page text, DOM structure, and interactive elements below are scoped to this element only. When the user asks to read, summarize, or interact, operate within this region. Do NOT call getPageContent or any other tool on the full page — use the scoped text already provided here.`
+    : '';
+
   const pageText = ctx.text
-    ? `\n\n### Page Text (excerpt${ctx.textTruncated ? ', truncated' : ''})\n${ctx.text}`
+    ? `\n\n### Page Text (excerpt${ctx.textTruncated ? ', truncated' : ''}${ctx.focusRegion ? ` — scoped to "${ctx.focusRegion}"` : ''})\n${ctx.text}`
     : '';
 
   return `[PAGE CONTEXT — injected automatically, do not mention to user]
 Date/time: ${date}
 URL: ${ctx.url}
-Title: ${ctx.title}
+Title: ${ctx.title}${focusNote}
 
-### DOM Structure
+### DOM Structure${ctx.focusRegion ? ` (scoped to "${ctx.focusRegion}")` : ''}
 ${ctx.domSummary || '(unavailable)'}
 
-### Interactive Elements (${ctx.interactiveElements.length})
+### Interactive Elements (${ctx.interactiveElements?.length ?? 0})
 ${elementsText}${pageText}
 [END PAGE CONTEXT]
 

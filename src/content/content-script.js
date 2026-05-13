@@ -4,6 +4,32 @@
 const MAX_TEXT_LENGTH = 15000;
 const MAX_HTML_LENGTH = 30000;
 
+// Traverse Shadow DOM boundaries. LinkedIn and other SPAs render modals and
+// interactive elements inside shadow roots that are invisible to querySelector.
+function querySelectorDeep(selector, root = document) {
+  const found = root.querySelector(selector);
+  if (found) return found;
+  const all = root.querySelectorAll('*');
+  for (const el of all) {
+    if (el.shadowRoot) {
+      const deep = querySelectorDeep(selector, el.shadowRoot);
+      if (deep) return deep;
+    }
+  }
+  return null;
+}
+
+function querySelectorAllDeep(selector, root = document) {
+  const results = Array.from(root.querySelectorAll(selector));
+  const all = root.querySelectorAll('*');
+  for (const el of all) {
+    if (el.shadowRoot) {
+      results.push(...querySelectorAllDeep(selector, el.shadowRoot));
+    }
+  }
+  return results;
+}
+
 const handlers = {
   GET_PAGE_CONTENT({ maxLength = MAX_TEXT_LENGTH, rootSelector } = {}) {
     const root = rootSelector ? document.querySelector(rootSelector) : document.body;
@@ -67,7 +93,7 @@ const handlers = {
   },
 
   async CLICK_ELEMENT({ selector, waitAfterMs = 500 } = {}) {
-    const el = document.querySelector(selector);
+    const el = querySelectorDeep(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
 
     el.focus();
@@ -125,7 +151,7 @@ const handlers = {
 
     const results = [];
     for (const { selector, value } of fields) {
-      const el = document.querySelector(selector);
+      const el = querySelectorDeep(selector);
       if (!el) { results.push({ selector, success: false, error: 'Not found' }); continue; }
       try {
         fillOne(el, value);
@@ -138,7 +164,7 @@ const handlers = {
   },
 
   SUBMIT_FORM({ selector } = {}) {
-    const el = document.querySelector(selector);
+    const el = querySelectorDeep(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
 
     // 1. Explicit <form> submit
@@ -172,7 +198,7 @@ const handlers = {
 
   SCROLL_PAGE({ direction = 'down', amount = 500, selector } = {}) {
     if (selector) {
-      const el = document.querySelector(selector);
+      const el = querySelectorDeep(selector);
       if (!el) return { success: false, error: `Element not found: ${selector}` };
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return { success: true, method: 'scrollIntoView' };
@@ -188,7 +214,7 @@ const handlers = {
   },
 
   HIGHLIGHT_ELEMENT({ selector, color = '#ff6b35' } = {}) {
-    const el = document.querySelector(selector);
+    const el = querySelectorDeep(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
     const prev = el.style.outline;
     el.style.outline = `3px solid ${color}`;
@@ -424,7 +450,7 @@ const handlers = {
   },
 
   async TYPE_TEXT({ selector, text, clearFirst = false, pressEnter = false } = {}) {
-    const el = document.querySelector(selector);
+    const el = querySelectorDeep(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
     el.focus();
 
@@ -480,7 +506,7 @@ const handlers = {
   },
 
   PRESS_KEY({ selector, key, modifiers = [] } = {}) {
-    const target = selector ? document.querySelector(selector) : document.activeElement;
+    const target = selector ? querySelectorDeep(selector) : document.activeElement;
     if (selector && !target) return { success: false, error: `Element not found: ${selector}` };
     const opts = {
       key,
@@ -497,7 +523,7 @@ const handlers = {
   },
 
   GET_ELEMENT_RECT({ selector, scrollIntoView = true } = {}) {
-    const el = document.querySelector(selector);
+    const el = querySelectorDeep(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
 
     // Scroll element into view so captureVisibleTab captures it correctly
@@ -630,6 +656,245 @@ const handlers = {
         resolve({ found: false, elapsed: timeoutMs });
       }, timeoutMs);
     });
+  },
+
+  CLASSIFY_PAGE() {
+    const url = location.href;
+    const title = document.title;
+    const bodyText = document.body?.innerText?.slice(0, 3000) || '';
+
+    // Detect page type from URL patterns and DOM landmarks
+    const hasForms = document.querySelectorAll('form').length > 0;
+    const hasComments = !!document.querySelector(
+      '[class*="comment"], [id*="comment"], [class*="discussion"], [id*="discussion"], ' +
+      '[class*="reply"], [id*="reply"], [class*="responses"], [data-testid*="reply"]'
+    );
+    const hasArticle = !!document.querySelector('article, [role="article"], [class*="article"], [class*="post-content"], [class*="entry-content"]');
+    const hasProductPrice = !!document.querySelector('[class*="price"], [itemprop="price"], [class*="product"]');
+    const hasInfiniteScroll = !!document.querySelector('[class*="feed"], [class*="timeline"], [class*="stream"]');
+    const hasLoginForm = !!document.querySelector('input[type="password"]');
+    const hasSearchBox = !!document.querySelector('input[type="search"], [role="searchbox"], input[name*="search"], input[placeholder*="search" i], input[placeholder*="recherche" i]');
+    const hasVideoPlayer = !!document.querySelector('video, [class*="player"], [id*="player"]');
+    const hasPagination = !!document.querySelector('[class*="pagination"], [aria-label*="pagination"], a[href*="page="]');
+
+    const urlLower = url.toLowerCase();
+    const isSocialMedia = /twitter\.com|x\.com|linkedin\.com|facebook\.com|instagram\.com|reddit\.com|tiktok\.com/.test(urlLower);
+    const isEcommerce = /amazon\.|ebay\.|shopify|etsy\.com|\.shop\/|\/product\/|\/products\//.test(urlLower) || hasProductPrice;
+    const isNews = /news\.|article|\/post\/|\/blog\/|medium\.com/.test(urlLower) || hasArticle;
+    const isSearch = /\/search[?\/]|google\.com\/search|bing\.com\/search/.test(urlLower);
+    const isVideo = /youtube\.com|vimeo\.com|dailymotion|twitch\.tv/.test(urlLower) || hasVideoPlayer;
+    const isForm = hasForms && !isSocialMedia && !isEcommerce;
+    const isDocs = /docs\.|\/docs\/|\/documentation\/|readthedocs|gitbook/.test(urlLower);
+
+    let type = 'generic';
+    if (hasLoginForm) type = 'login';
+    else if (isSearch) type = 'search_results';
+    else if (isVideo) type = 'video';
+    else if (isSocialMedia && hasInfiniteScroll) type = 'social_feed';
+    else if (isSocialMedia && hasComments) type = 'social_post';
+    else if (isSocialMedia) type = 'social';
+    else if (isEcommerce) type = 'product';
+    else if (isNews || hasArticle) type = 'article';
+    else if (isDocs) type = 'documentation';
+    else if (isForm) type = 'form';
+
+    const features = [];
+    if (hasComments) features.push('comments');
+    if (hasPagination) features.push('pagination');
+    if (hasInfiniteScroll) features.push('infinite_scroll');
+    if (hasSearchBox) features.push('search_box');
+    if (hasForms) features.push('forms');
+    if (hasVideoPlayer) features.push('video_player');
+
+    return { type, title, url, features };
+  },
+
+  DISMISS_OVERLAY() {
+    const dismissed = [];
+
+    // Common dismiss selectors: cookie banners, GDPR, modals, popups
+    const dismissSelectors = [
+      // Accept/close buttons by text
+      ...querySelectorAllDeep('button, a[role="button"], [role="button"]').filter(el => {
+        const text = el.innerText?.trim().toLowerCase();
+        return text && (
+          text === 'accept' || text === 'accept all' || text === 'accept cookies' ||
+          text === 'tout accepter' || text === 'accepter' || text === "j'accepte" ||
+          text === 'agree' || text === 'i agree' || text === 'ok' || text === 'got it' ||
+          text === 'close' || text === 'dismiss' || text === 'fermer' || text === 'continuer' ||
+          text === 'continue' || text === 'i understand' || text === "d'accord"
+        );
+      }),
+      // Selector-based close buttons
+      ...querySelectorAllDeep(
+        '[class*="cookie"] button, [id*="cookie"] button, [class*="consent"] button, ' +
+        '[class*="gdpr"] button, [class*="banner"] button[class*="close"], ' +
+        '[class*="modal"] button[aria-label*="close" i], [class*="popup"] button[class*="close"], ' +
+        '[class*="overlay"] button[class*="close"], button[aria-label="Close"], ' +
+        'button[aria-label="Fermer"], button[aria-label="close dialog"]'
+      )
+    ];
+
+    // Deduplicate by reference
+    const seen = new Set();
+    const targets = dismissSelectors.filter(el => {
+      if (seen.has(el)) return false;
+      seen.add(el);
+      // Only dismiss if the element is visible
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+
+    for (const el of targets.slice(0, 3)) {
+      try {
+        el.click();
+        dismissed.push(el.innerText?.trim().slice(0, 40) || el.getAttribute('aria-label') || el.tagName);
+      } catch { /* skip */ }
+    }
+
+    return { dismissed, count: dismissed.length };
+  },
+
+  FIND_COMMENT_BOX() {
+    // Ordered from most specific to most generic
+    const candidates = querySelectorAllDeep(
+      'textarea[placeholder*="comment" i], textarea[placeholder*="reply" i], ' +
+      'textarea[placeholder*="Write" i], textarea[placeholder*="Add" i], ' +
+      'textarea[placeholder*="commentaire" i], textarea[placeholder*="réponse" i], ' +
+      '[contenteditable="true"][placeholder*="comment" i], ' +
+      '[contenteditable="true"][placeholder*="reply" i], ' +
+      '[contenteditable="true"][data-placeholder*="comment" i], ' +
+      '[contenteditable="true"][aria-label*="comment" i], ' +
+      '[contenteditable="true"][aria-label*="reply" i], ' +
+      '[contenteditable="true"][aria-label*="Add a comment" i], ' +
+      '[role="textbox"][aria-label*="comment" i], ' +
+      '[role="textbox"][aria-label*="reply" i]'
+    );
+
+    // Also check for comment form containers
+    const formContainers = querySelectorAllDeep(
+      'form[id*="comment"], form[class*="comment"], ' +
+      '[id*="comment-form"], [class*="comment-form"], ' +
+      '[id*="reply-form"], [class*="reply-form"]'
+    );
+
+    const formInputs = formContainers.flatMap(form =>
+      Array.from(form.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]'))
+    );
+
+    const all = [...candidates, ...formInputs];
+    const seen = new Set();
+    const unique = all.filter(el => {
+      if (seen.has(el)) return false;
+      seen.add(el);
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0;
+    });
+
+    if (unique.length === 0) return { found: false, selector: null, count: 0 };
+
+    const el = unique[0];
+
+    // Build a best-effort unique selector
+    let selector = null;
+    if (el.id) selector = `#${CSS.escape(el.id)}`;
+    else if (el.getAttribute('data-testid')) selector = `[data-testid="${el.getAttribute('data-testid')}"]`;
+    else if (el.getAttribute('aria-label')) selector = `[aria-label="${el.getAttribute('aria-label')}"]`;
+    else {
+      const tag = el.tagName.toLowerCase();
+      const cls = Array.from(el.classList).slice(0, 2).map(c => `.${CSS.escape(c)}`).join('');
+      selector = `${tag}${cls}`;
+    }
+
+    const rect = el.getBoundingClientRect();
+    return {
+      found: true,
+      selector,
+      tag: el.tagName.toLowerCase(),
+      type: el.getAttribute('type') || (el.isContentEditable ? 'contenteditable' : el.tagName.toLowerCase()),
+      placeholder: el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || el.getAttribute('aria-label') || '',
+      count: unique.length,
+      rect: { top: Math.round(rect.top), left: Math.round(rect.left), width: Math.round(rect.width), height: Math.round(rect.height) }
+    };
+  },
+
+  SEARCH_ON_PAGE({ query, limit = 10 } = {}) {
+    if (!query) return { matches: [], count: 0, error: 'No query provided' };
+    const q = query.toLowerCase();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const tag = node.parentElement?.tagName;
+        if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(tag)) return NodeFilter.FILTER_REJECT;
+        return node.textContent.toLowerCase().includes(q) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      }
+    });
+
+    const matches = [];
+    while (walker.nextNode() && matches.length < limit) {
+      const node = walker.currentNode;
+      const text = node.textContent;
+      const idx = text.toLowerCase().indexOf(q);
+      const start = Math.max(0, idx - 60);
+      const end = Math.min(text.length, idx + query.length + 60);
+      const el = node.parentElement;
+      let sel = null;
+      if (el.id) sel = `#${CSS.escape(el.id)}`;
+      else { const tag = el.tagName.toLowerCase(); const cls = Array.from(el.classList).slice(0,1).map(c => `.${CSS.escape(c)}`).join(''); sel = `${tag}${cls}`; }
+      matches.push({ excerpt: text.slice(start, end).trim(), selector: sel });
+    }
+
+    return { query, matches, count: matches.length };
+  },
+
+  async READ_THREAD({ selector, maxComments = 30, loadMoreSelector, waitMs = 1000 } = {}) {
+    const root = selector ? document.querySelector(selector) : document.body;
+    if (selector && !root) return { error: `Selector not found: ${selector}`, comments: [] };
+
+    // Try to click "load more" / "show more comments" buttons
+    if (loadMoreSelector) {
+      const btn = document.querySelector(loadMoreSelector);
+      if (btn) {
+        btn.click();
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+    } else {
+      // Auto-detect load more buttons
+      const loadMoreCandidates = Array.from(document.querySelectorAll('button, a[role="button"]')).filter(el => {
+        const t = el.innerText?.trim().toLowerCase();
+        return t && (t.includes('load more') || t.includes('show more') || t.includes('voir plus') ||
+          t.includes('more comment') || t.includes('more replies') || t.includes('plus de commentaires'));
+      });
+      for (const btn of loadMoreCandidates.slice(0, 2)) {
+        btn.click();
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+    }
+
+    // Extract comment-like elements
+    const commentSelectors = [
+      '[class*="comment"]', '[class*="reply"]', '[class*="response"]',
+      '[data-testid*="reply"]', '[data-testid*="comment"]',
+      'article', '[role="article"]'
+    ];
+
+    let items = [];
+    for (const sel of commentSelectors) {
+      const found = Array.from((root || document.body).querySelectorAll(sel));
+      if (found.length >= 2) { items = found; break; }
+    }
+
+    const comments = items.slice(0, maxComments).map(el => {
+      const author = el.querySelector('[class*="author"], [class*="name"], [class*="user"], [rel="author"]')?.innerText?.trim() || '';
+      const time = el.querySelector('time, [class*="time"], [class*="date"]')?.innerText?.trim() || '';
+      const text = el.innerText?.trim().slice(0, 500) || '';
+      return { author, time, text };
+    }).filter(c => c.text.length > 5);
+
+    return {
+      count: comments.length,
+      comments,
+      rootSelector: selector || null
+    };
   }
 };
 

@@ -436,5 +436,60 @@ export const browserTools = [
       required: ['rootSelector', 'text']
     },
     execute: ({ rootSelector, text }) => sendToContentScript('WRITE_TO_REGION', { rootSelector, text })
+  },
+
+  {
+    name: 'classifyPage',
+    description: 'Identify the type and key features of the current page (article, social feed, product, form, video, search results, documentation, login, etc.). Call this at the start of a task to understand what kind of page you are on and adapt your strategy accordingly.',
+    parameters: { type: 'object', properties: {} },
+    execute: () => sendToContentScript('CLASSIFY_PAGE')
+  },
+
+  {
+    name: 'dismissOverlay',
+    description: 'Automatically detect and dismiss cookie banners, GDPR consent popups, newsletter modals, and other overlays that block page content. Call this when the page is obscured by a popup before trying to read or interact with content.',
+    parameters: { type: 'object', properties: {} },
+    execute: () => sendToContentScript('DISMISS_OVERLAY')
+  },
+
+  {
+    name: 'findCommentBox',
+    description: 'Locate the comment or reply input box on the current page. Returns the CSS selector, element type, and placeholder text so you can then use typeText or writeToRegion to post a comment. Use this before posting a comment when you are not sure where the input is.',
+    parameters: { type: 'object', properties: {} },
+    execute: () => sendToContentScript('FIND_COMMENT_BOX')
+  },
+
+  {
+    name: 'searchOnPage',
+    description: 'Search for a keyword or phrase within the current page text (like Ctrl+F). Returns matching text excerpts and their CSS selectors. Useful to locate a specific section, product name, person, or piece of information without reading the full page.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The word or phrase to search for on the page' },
+        limit: { type: 'number', description: 'Maximum number of matches to return (default 10)' }
+      },
+      required: ['query']
+    },
+    execute: ({ query, limit = 10 }) => sendToContentScript('SEARCH_ON_PAGE', { query, limit })
+  },
+
+  {
+    name: 'readThread',
+    description: 'Read all comments or replies in a discussion thread. Automatically clicks "load more" buttons to expand the thread before extracting. Returns structured comment data with author, timestamp, and text. Use this on blog posts, Reddit, YouTube comments, news articles, or any page with a comment section.',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector of the thread container (e.g. "#comments", ".discussion", "[data-testid=\'replies\']"). Omit to auto-detect on the full page.' },
+        maxComments: { type: 'number', description: 'Maximum number of comments to return (default 30)' },
+        loadMoreSelector: { type: 'string', description: 'CSS selector of the "load more comments" button if auto-detection fails.' },
+        waitMs: { type: 'number', description: 'Milliseconds to wait after clicking load-more for content to appear (default 1000)' }
+      }
+    },
+    execute: (p) => sendToContentScript('READ_THREAD', {
+      selector: p?.selector,
+      maxComments: p?.maxComments || 30,
+      loadMoreSelector: p?.loadMoreSelector,
+      waitMs: p?.waitMs || 1000
+    })
   }
 ];

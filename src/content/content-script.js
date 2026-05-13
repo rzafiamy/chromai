@@ -547,37 +547,37 @@ let _pickerOverlay = null;
 let _pickerHovered = null;
 
 function _pickerSelector(el) {
-  // Walk up to find the first ancestor with a stable unique identifier
-  let node = el;
-  for (let i = 0; i < 8 && node && node !== document.documentElement; i++, node = node.parentElement) {
+  const isUnique = (sel) => document.querySelectorAll(sel).length === 1;
+
+  // Build a segment for one node: prefer data attrs and id, fall back to tag+classes+nth
+  function nodeSegment(node, requireNth = false) {
     if (node.id) return `#${CSS.escape(node.id)}`;
     const testid = node.getAttribute('data-testid') || node.getAttribute('data-test-id') || node.getAttribute('data-cy');
-    if (testid) return `[data-testid="${CSS.escape(testid)}"]`;
-  }
-  // Build a short path using tag + meaningful classes, anchored at the nearest id ancestor
-  const parts = [];
-  node = el;
-  for (let i = 0; i < 6 && node && node !== document.documentElement; i++, node = node.parentElement) {
     const tag = node.tagName.toLowerCase();
     const classes = Array.from(node.classList)
       .filter(c => !/^(js-|is-|has-|ng-|v-|svelte-|css-|sc-)/.test(c) && c.length < 30)
-      .slice(0, 2)
-      .map(c => `.${CSS.escape(c)}`)
-      .join('');
-    const seg = `${tag}${classes}`;
-    // Check uniqueness — if this segment already identifies a unique element, stop
+      .slice(0, 2).map(c => `.${CSS.escape(c)}`).join('');
     const siblings = node.parentElement
       ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName)
       : [];
-    const withNth = siblings.length > 1 ? `${seg}:nth-of-type(${siblings.indexOf(node) + 1})` : seg;
-    parts.unshift(withNth);
-    if (node.parentElement?.id) {
-      parts.unshift(`#${CSS.escape(node.parentElement.id)}`);
-      break;
-    }
-    // Stop early if the path so far is already unique
-    if (i >= 1 && document.querySelectorAll(parts.join(' > ')).length === 1) break;
+    const nth = siblings.length > 1 || requireNth ? `:nth-of-type(${siblings.indexOf(node) + 1})` : '';
+    if (testid) return `[data-testid="${CSS.escape(testid)}"]${nth}`;
+    return `${tag}${classes}${nth}`;
   }
+
+  // Walk up building a path, stopping as soon as it's unique in the DOM
+  const parts = [];
+  let node = el;
+  for (let i = 0; i < 10 && node && node !== document.documentElement; i++, node = node.parentElement) {
+    const seg = nodeSegment(node, i === 0 && false);
+    parts.unshift(seg);
+    const sel = parts.join(' > ');
+    if (isUnique(sel)) return sel;
+    // If we've anchored on an id, the path will never get more unique — bail
+    if (seg.startsWith('#')) break;
+  }
+
+  // Last resort: use the full built path even if not unique
   return parts.join(' > ');
 }
 

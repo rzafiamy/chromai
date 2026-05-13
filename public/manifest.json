@@ -9,7 +9,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "tabs"
+    "tabs",
+    "microphone"
   ],
   "host_permissions": ["<all_urls>"],
 

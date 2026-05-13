@@ -314,16 +314,18 @@ export const browserTools = [
       const { adapter } = context ?? {};
       if (!adapter) throw new Error('Vision requires a provider adapter in tool context');
 
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 85 });
       let imageBase64;
 
       if (_focusRegion) {
-        const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: _focusRegion });
+        const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: _focusRegion, scrollIntoView: true });
         if (rectResult?.success && rectResult.rect?.pw > 0) {
+          await new Promise(r => setTimeout(r, 300));
+          const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 85 });
           imageBase64 = await cropScreenshot(dataUrl, rectResult.rect);
         }
       }
       if (!imageBase64) {
+        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 85 });
         imageBase64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
       }
 
@@ -405,8 +407,11 @@ export const browserTools = [
       const { adapter } = context ?? {};
       if (!adapter) throw new Error('Vision requires a provider adapter in tool context');
 
-      const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: p.selector });
+      const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: p.selector, scrollIntoView: true });
       if (!rectResult.success) throw new Error(rectResult.error);
+
+      // Wait for scroll + repaint to settle before screenshotting
+      await new Promise(r => setTimeout(r, 300));
 
       const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 90 });
       const imageBase64 = await cropScreenshot(dataUrl, rectResult.rect);

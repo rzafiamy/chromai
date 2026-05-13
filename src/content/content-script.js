@@ -496,25 +496,42 @@ const handlers = {
     return { success: true, key, target: target.tagName };
   },
 
-  GET_ELEMENT_RECT({ selector } = {}) {
+  GET_ELEMENT_RECT({ selector, scrollIntoView = true } = {}) {
     const el = document.querySelector(selector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
+
+    // Scroll element into view so captureVisibleTab captures it correctly
+    if (scrollIntoView) {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    }
+
     const r = el.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+
+    // Clamp to viewport bounds — the element may still be partially off-screen
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cx = Math.max(0, r.x);
+    const cy = Math.max(0, r.y);
+    const cw = Math.min(r.right, vw) - cx;
+    const ch = Math.min(r.bottom, vh) - cy;
+
+    if (cw <= 0 || ch <= 0) return { success: false, error: `Element "${selector}" is not visible in the viewport` };
+
     return {
       success: true,
       selector,
+      scrolled: scrollIntoView,
       rect: {
-        x: Math.round(r.x),
-        y: Math.round(r.y),
-        width: Math.round(r.width),
-        height: Math.round(r.height),
+        x: Math.round(cx),
+        y: Math.round(cy),
+        width: Math.round(cw),
+        height: Math.round(ch),
         devicePixelRatio: dpr,
-        // Physical pixel coords for screenshot cropping
-        px: Math.round(r.x * dpr),
-        py: Math.round(r.y * dpr),
-        pw: Math.round(r.width * dpr),
-        ph: Math.round(r.height * dpr)
+        px: Math.round(cx * dpr),
+        py: Math.round(cy * dpr),
+        pw: Math.round(cw * dpr),
+        ph: Math.round(ch * dpr)
       }
     };
   },

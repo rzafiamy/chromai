@@ -64,6 +64,15 @@
         </div>
 
         <div class="field">
+          <label>Microphone Access</label>
+          <div class="mic-permission-row">
+            <span id="mic-status" class="mic-status">Checking…</span>
+            <button type="button" id="btn-request-mic" class="btn-secondary hidden">Grant Access</button>
+          </div>
+          <span class="hint">Required for voice input (Whisper ASR). Click "Grant Access" if denied.</span>
+        </div>
+
+        <div class="field">
           <label for="visionModel">Vision / OCR Model <span class="optional">(optional)</span></label>
           <input type="text" id="visionModel" placeholder="same as main model" autocomplete="off">
           <span class="hint">Model used for screenshot analysis and OCR. Leave empty to use the main model (must support vision).</span>

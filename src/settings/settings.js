@@ -17,6 +17,37 @@ getSettings().then(settings => {
   document.getElementById('requestTimeout').value = settings.requestTimeout ?? 120000;
 });
 
+// ── Microphone permission UI ──
+const micStatus = document.getElementById('mic-status');
+const btnRequestMic = document.getElementById('btn-request-mic');
+
+const updateMicStatus = (state) => {
+  const labels = { granted: '✓ Granted', denied: '✗ Denied', prompt: 'Not yet granted' };
+  const classes = { granted: 'granted', denied: 'denied', prompt: 'prompt' };
+  micStatus.textContent = labels[state] ?? 'Unknown';
+  micStatus.className = `mic-status ${classes[state] ?? ''}`;
+  btnRequestMic.classList.toggle('hidden', state === 'granted');
+};
+
+if (navigator.permissions) {
+  navigator.permissions.query({ name: 'microphone' }).then(result => {
+    updateMicStatus(result.state);
+    result.addEventListener('change', () => updateMicStatus(result.state));
+  }).catch(() => updateMicStatus('prompt'));
+} else {
+  updateMicStatus('prompt');
+}
+
+btnRequestMic.addEventListener('click', async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());
+    updateMicStatus('granted');
+  } catch {
+    updateMicStatus('denied');
+  }
+});
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   await saveSettings({

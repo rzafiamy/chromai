@@ -150,3 +150,30 @@ code {
   font-size: 11px;
   color: #a5f3fc;
 }
+.mic-permission-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.mic-status {
+  font-size: 13px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: var(--bg3);
+  color: var(--text-muted);
+}
+.mic-status.granted { background: #052e16; color: #4ade80; }
+.mic-status.denied  { background: #3b0000; color: #f87171; }
+.mic-status.prompt  { background: #3a2e00; color: #fbbf24; }
+.btn-secondary {
+  padding: 4px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-secondary:hover { background: var(--bg2); }
+.hidden { display: none !important; }

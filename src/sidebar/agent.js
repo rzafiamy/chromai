@@ -1,57 +1,21 @@
 import { SessionManager, OpenAICompatibleAdapter } from 'lemura';
 import { browserTools } from './tools.js';
-import { showConfirm, showToolActivity, resolveToolActivity, showIterationBadge, showThinkingText, showStopReason, markContinuation, showBlockedBadge } from './ui.js';
+import {
+  showConfirm,
+  showToolActivity,
+  resolveToolActivity,
+  showIterationBadge,
+  showThinkingText,
+  showStopReason,
+  markContinuation,
+  showBlockedBadge,
+  showVerificationEvent,
+  showGoalVerification,
+  showGoalCorrection,
+  updateCognitiveStats
+} from './ui.js';
 import { buildSystemPrompt } from './prompt.js';
 import { describeToolCall, highlightOnPage } from './skills.js';
-
-const makeTracer = () => {
-  const pending = new Map();
-  let iterationDiv = null;
-  let lastThinkingDiv = null;
-
-  return (event) => {
-    // ── Tool calls ──
-    if (event.type === 'tool_call') {
-      const div = showToolActivity(event.name, event.input);
-      pending.set(event.metadata?.id ?? event.name, div);
-
-    } else if (event.type === 'tool_result') {
-      const key = event.metadata?.id ?? event.name;
-      resolveToolActivity(pending.get(key));
-      pending.delete(key);
-
-    // ── LLM thinking ──
-    } else if (event.type === 'thinking') {
-      if (event.name === 'llm_call') {
-        if (event.status === 'running') {
-          iterationDiv = showIterationBadge(event.metadata?.iteration);
-          lastThinkingDiv = null;
-        } else if (event.status === 'done' && event.output) {
-          // Show intermediate reasoning text (only when the LLM emitted text
-          // before tool calls or before stopping — helps diagnose premature stops)
-          lastThinkingDiv = showThinkingText(event.output);
-        }
-      } else if (event.name === 'llm_stream_finished') {
-        const reason = event.metadata?.finishReason;
-        if (reason && reason !== 'tool_call') {
-          showStopReason(reason, lastThinkingDiv);
-        }
-      }
-
-    // ── Planning events ──
-    } else if (event.type === 'planning') {
-      if (event.name === 'max_steps_reached') {
-        showStopReason('max_steps', lastThinkingDiv);
-      } else if (event.name === 'continuation_detected') {
-        markContinuation(iterationDiv, event.metadata?.action);
-      }
-
-    // ── Budget / firewall ──
-    } else if (event.type === 'budget' && event.name === 'firewall_blocked') {
-      showBlockedBadge(event.metadata?.toolName);
-    }
-  };
-};
 
 const makeFirewall = () => ({
   defaultDecision: 'allow',
@@ -99,27 +63,132 @@ const makeAdapter = (settings) => {
 
 export const createAdapter = (settings) => makeAdapter(settings);
 
-export const createBrowserSession = ({ settings }) => new SessionManager({
-  adapter: makeAdapter(settings),
-  model: settings.model || 'gpt-4o-mini',
-  maxTokens: settings.contextWindow || 128000,
-  maxIterations: settings.maxIterations,
-  maxSteps: settings.maxSteps,
-  maxCompletionTokens: settings.maxCompletionTokens,
-  tools: browserTools,
+export const createBrowserSession = ({ settings }) => {
+  let session = null;
+  const pending = new Map();
+  let iterationDiv = null;
+  let lastThinkingDiv = null;
 
-  media: { enableTools: true, toolPrefix: 'media_' },
+  const refreshStats = () => {
+    if (session && session.cognitiveStats) {
+      session.cognitiveStats.turns = session.context?.turns?.filter(t => t.role === 'user').length ?? 0;
+      session.cognitiveStats.steps = session.stepCounter?.count ?? 0;
+      updateCognitiveStats(session.cognitiveStats);
+    }
+  };
 
-  enableGoalPlanning: settings.enableGoalPlanning,
-  goalInjectionFrequency: settings.goalInjectionFrequency,
-  goalInjectionPosition: settings.goalInjectionPosition,
-  enableContinuationPlanning: settings.enableContinuationPlanning,
+  const tracer = (event) => {
+    // ── Tool calls ──
+    if (event.type === 'tool_call') {
+      if (session && session.cognitiveStats) {
+        session.cognitiveStats.activeToolCalls++;
+      }
+      refreshStats();
+      const div = showToolActivity(event.name, event.input);
+      pending.set(event.metadata?.id ?? event.name, div);
 
-  parallelToolCalls: settings.parallelToolCalls,
-  toolFirewall: makeFirewall(),
-  toolRegistryTimeoutMs: 30000,
-  maxTokensPerTool: settings.maxTokensPerTool,
+    } else if (event.type === 'tool_result') {
+      if (session && session.cognitiveStats) {
+        session.cognitiveStats.activeToolCalls = Math.max(0, session.cognitiveStats.activeToolCalls - 1);
+      }
+      refreshStats();
+      const key = event.metadata?.id ?? event.name;
+      resolveToolActivity(pending.get(key));
+      pending.delete(key);
 
-  systemPrompt: buildSystemPrompt(settings.systemPrompt),
-  onTrace: makeTracer()
-});
+    // ── LLM thinking ──
+    } else if (event.type === 'thinking') {
+      if (event.name === 'llm_call') {
+        if (event.status === 'running') {
+          iterationDiv = showIterationBadge(event.metadata?.iteration);
+          lastThinkingDiv = null;
+        } else if (event.status === 'done' && event.output) {
+          lastThinkingDiv = showThinkingText(event.output);
+        }
+        
+        if (event.status === 'done' && event.metadata?.usage && session && session.cognitiveStats) {
+          session.cognitiveStats.inputTokens += event.metadata.usage.promptTokens ?? 0;
+          session.cognitiveStats.outputTokens += event.metadata.usage.completionTokens ?? 0;
+          refreshStats();
+        }
+      } else if (event.name === 'llm_stream_finished') {
+        const reason = event.metadata?.finishReason;
+        if (reason && reason !== 'tool_call' && reason !== 'stop') {
+          showStopReason(reason, lastThinkingDiv);
+        }
+        
+        if (event.metadata?.usage && session && session.cognitiveStats) {
+          session.cognitiveStats.inputTokens += event.metadata.usage.promptTokens ?? 0;
+          session.cognitiveStats.outputTokens += event.metadata.usage.completionTokens ?? 0;
+          refreshStats();
+        }
+      }
+
+    // ── Planning events ──
+    } else if (event.type === 'planning') {
+      if (event.name === 'max_steps_reached') {
+        showStopReason('max_steps', lastThinkingDiv);
+      } else if (event.name === 'continuation_detected') {
+        markContinuation(iterationDiv, event.metadata?.action);
+      } else if (event.name === 'step_retry' || event.name === 'step_failed' || event.name === 'step_skipped') {
+        showVerificationEvent(event.name, event.metadata);
+      }
+
+    // ── Verification / goal events ──
+    } else if (event.type === 'verification') {
+      if (event.name === 'goal_verification_result') {
+        const achieved = event.metadata?.achieved ?? true;
+        showGoalVerification(achieved ? 'achieved' : 'failed', event.metadata?.reason || event.metadata?.missing);
+      } else if (event.name === 'goal_correction_start' || event.name === 'goal_correction_done') {
+        showGoalCorrection(event.name, event.metadata);
+      }
+
+    // ── Error events ──
+    } else if (event.type === 'error') {
+      if (event.name === 'goal_correction_failed') {
+        showGoalCorrection(event.name, event.metadata);
+      }
+
+    // ── Budget / firewall ──
+    } else if (event.type === 'budget' && event.name === 'firewall_blocked') {
+      showBlockedBadge(event.metadata?.toolName);
+    }
+  };
+
+  session = new SessionManager({
+    adapter: makeAdapter(settings),
+    model: settings.model || 'gpt-4o-mini',
+    maxTokens: settings.contextWindow || 128000,
+    maxIterations: settings.maxIterations,
+    maxSteps: settings.maxSteps,
+    maxCompletionTokens: settings.maxCompletionTokens,
+    tools: browserTools,
+    media: { enableTools: true, toolPrefix: 'media_' },
+    enableGoalPlanning: settings.enableGoalPlanning,
+    goalInjectionFrequency: settings.goalInjectionFrequency,
+    goalInjectionPosition: settings.goalInjectionPosition,
+    enableContinuationPlanning: settings.enableContinuationPlanning,
+    enableGoalVerification: settings.enableGoalVerification,
+    staticSystemPrompt: settings.staticSystemPrompt,
+    parallelToolCalls: settings.parallelToolCalls,
+    toolFirewall: makeFirewall(),
+    toolRegistryTimeoutMs: 30000,
+    maxTokensPerTool: settings.maxTokensPerTool,
+    systemPrompt: buildSystemPrompt(settings.systemPrompt),
+    onTrace: tracer
+  });
+
+  session.cognitiveStats = {
+    turns: 0,
+    activeToolCalls: 0,
+    steps: 0,
+    maxSteps: settings.maxSteps || 30,
+    inputTokens: 0,
+    outputTokens: 0,
+    maxTokens: settings.contextWindow || 16000
+  };
+
+  refreshStats();
+
+  return session;
+};

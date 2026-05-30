@@ -162,6 +162,26 @@
             <span>Allow the agent to call multiple tools simultaneously</span>
           </label>
         </div>
+
+        <div class="field">
+          <label>Post-run Goal Verification</label>
+          <label class="toggle">
+            <input type="checkbox" id="enableGoalVerification">
+            <span class="toggle-track"></span>
+            <span>Enable post-run goal verification</span>
+          </label>
+          <span class="hint">Performs a final validation of the target goal when the run finishes. If unmet, triggers a correction retry.</span>
+        </div>
+
+        <div class="field">
+          <label>Freeze System Prompt (Stable KV-cache)</label>
+          <label class="toggle">
+            <input type="checkbox" id="staticSystemPrompt">
+            <span class="toggle-track"></span>
+            <span>Freeze system prompt across ReAct iterations</span>
+          </label>
+          <span class="hint">Keeps system prompt 100% frozen between turns and redirects goals/plans to the last user message instead. Saves time and tokens on long agentic tasks.</span>
+        </div>
       </section>
 
       <div class="actions">

@@ -8,7 +8,7 @@ const escapeHtml = (str) => str
   .replace(/"/g, '&quot;');
 
 // Full markdown renderer: headings, bold, italic, code, lists, links
-const renderMarkdown = (text) => {
+export const renderMarkdown = (text) => {
   // Fenced code blocks (must run first)
   text = text.replace(/```([\w]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
     const langLabel = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '';
@@ -96,6 +96,13 @@ const makeCopyButton = (text) => {
 
 export const renderMessage = (role, content) => {
   const container = messagesEl();
+  
+  // Clear the welcome message screen on the first prompt
+  const welcomeEl = container.querySelector('.welcome-message');
+  if (welcomeEl) {
+    welcomeEl.remove();
+  }
+
   const div = document.createElement('div');
   div.className = `message message-${role}`;
 
@@ -353,4 +360,222 @@ export const showBlockedBadge = (toolName) => {
 export const updateModelBadge = (model) => {
   const badge = document.getElementById('model-badge');
   if (badge) badge.textContent = model || '';
+};
+
+export const updateAssistantMessage = (div, content) => {
+  if (!div) return;
+  
+  // Strip out any goal verification warning text blocks injected by the Lemura runtime
+  const warningRegex = /---\s*(?:⚠️|⚡|🚨|\u26A0\uFE0F)?\s*\*\*Goal Verification Warning\*\*[\s\S]*$/i;
+  const cleanContent = content.replace(warningRegex, '').trim();
+
+  const bodyEl = div.querySelector('.msg-body');
+  if (bodyEl) {
+    bodyEl.innerHTML = renderMarkdown(cleanContent);
+  }
+  
+  // Remove any existing copy buttons to avoid duplication
+  const oldCopyBtn = div.querySelector('.msg-copy-btn');
+  if (oldCopyBtn) oldCopyBtn.remove();
+  
+  const msgContent = div.querySelector('.msg-content');
+  if (msgContent) {
+    msgContent.appendChild(makeCopyButton(cleanContent));
+  }
+  
+  // Wire copy-code buttons
+  div.querySelectorAll('.copy-code-btn').forEach(btn => {
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    newBtn.addEventListener('click', async () => {
+      const id = newBtn.dataset.target;
+      const code = document.getElementById(id)?.textContent || '';
+      await navigator.clipboard.writeText(code);
+      const orig = newBtn.innerHTML;
+      newBtn.textContent = 'Copied!';
+      setTimeout(() => { newBtn.innerHTML = orig; }, 1800);
+    });
+  });
+};
+
+export const showVerificationEvent = (name, metadata) => {
+  // Deduplicate retry events to keep the feed clean
+  if (name === 'step_retry') {
+    const existing = document.querySelector(`.trace-verification[data-step="${metadata?.stepId || ''}"]`);
+    if (existing) existing.remove();
+  }
+
+  const container = messagesEl();
+  const div = document.createElement('div');
+  div.className = 'trace-verification';
+  if (metadata?.stepId) {
+    div.setAttribute('data-step', metadata.stepId);
+  }
+  let message = '';
+  if (name === 'step_retry') {
+    message = `🔄 Step ${metadata?.stepId || ''} retry #${metadata?.retryCount || 1}${metadata?.reason ? `: ${metadata.reason}` : ''}`;
+  } else if (name === 'step_failed') {
+    message = `❌ Step ${metadata?.stepId || ''} failed${metadata?.reason ? `: ${metadata.reason}` : ''}`;
+  } else if (name === 'step_skipped') {
+    message = `⏭️ Step ${metadata?.stepId || ''} skipped${metadata?.reason ? `: ${metadata.reason}` : ''}`;
+  } else {
+    message = `🔍 Verification: ${name}`;
+  }
+  div.innerHTML = `<span>${escapeHtml(message)}</span>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+};
+
+export const getOrCreateVerificationContainer = () => {
+  let el = document.getElementById('unified-goal-verifier');
+  if (!el) {
+    el = document.createElement('details');
+    el.id = 'unified-goal-verifier';
+    el.className = 'unified-goal-verifier';
+    el.innerHTML = `
+      <summary class="verifier-summary">
+        <div class="verifier-summary-left">
+          <span class="verifier-indicator-dot"></span>
+          <span class="verifier-title">Goal Verification Status</span>
+        </div>
+        <div class="verifier-summary-right">
+          <span id="verifier-status-badge" class="verifier-badge verifier-badge-pending">Running...</span>
+          <svg class="verifier-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </summary>
+      <div class="verifier-details-content">
+        <ul id="verifier-log-list" class="verifier-log-list"></ul>
+      </div>
+    `;
+    messagesEl().appendChild(el);
+  }
+  return el;
+};
+
+export const showGoalVerification = (status, reason) => {
+  const container = getOrCreateVerificationContainer();
+  
+  const badge = container.querySelector('#verifier-status-badge');
+  if (badge) {
+    badge.className = `verifier-badge verifier-badge-${status === 'achieved' ? 'success' : 'failed'}`;
+    badge.textContent = status === 'achieved' ? 'Goal Achieved' : 'Goal Failed';
+  }
+  
+  const dot = container.querySelector('.verifier-indicator-dot');
+  if (dot) {
+    dot.style.background = status === 'achieved' ? '#10b981' : '#ef4444';
+    dot.style.boxShadow = status === 'achieved' ? '0 0 8px #10b981' : '0 0 8px #ef4444';
+    dot.style.animation = 'none';
+  }
+
+  const logList = container.querySelector('#verifier-log-list');
+  if (logList) {
+    const li = document.createElement('li');
+    const icon = status === 'achieved' ? '✓' : '⚠️';
+    const title = status === 'achieved' ? 'Goal Achieved' : 'Goal Verification Failed';
+    li.innerHTML = `<strong>${icon} ${title}</strong>${reason ? `<div class="verifier-log-desc">${escapeHtml(reason)}</div>` : ''}`;
+    logList.appendChild(li);
+  }
+  
+  messagesEl().scrollTop = messagesEl().scrollHeight;
+  return container;
+};
+
+export const showGoalCorrection = (name, metadata) => {
+  const container = getOrCreateVerificationContainer();
+  
+  const badge = container.querySelector('#verifier-status-badge');
+  const dot = container.querySelector('.verifier-indicator-dot');
+  
+  let msg = '';
+  if (name === 'goal_correction_start') {
+    msg = `🔧 Initiating goal correction loop: ${metadata?.missing || 'some criteria unmet'}`;
+    if (badge) {
+      badge.className = 'verifier-badge verifier-badge-correcting';
+      badge.textContent = 'Correcting...';
+    }
+    if (dot) {
+      dot.style.background = '#f59e0b';
+      dot.style.boxShadow = '0 0 8px #f59e0b';
+    }
+  } else if (name === 'goal_correction_done') {
+    msg = `✅ Goal correction applied. Running final verification...`;
+    if (badge) {
+      badge.className = 'verifier-badge verifier-badge-pending';
+      badge.textContent = 'Verifying...';
+    }
+    if (dot) {
+      dot.style.background = '#a855f7';
+      dot.style.boxShadow = '0 0 8px #a855f7';
+    }
+  } else if (name === 'goal_correction_failed') {
+    msg = `⚠️ Goal correction failed to satisfy all criteria.`;
+    if (badge) {
+      badge.className = 'verifier-badge verifier-badge-failed';
+      badge.textContent = 'Failed';
+    }
+    if (dot) {
+      dot.style.background = '#ef4444';
+      dot.style.boxShadow = '0 0 8px #ef4444';
+    }
+  } else {
+    msg = `🔧 Goal correction: ${name}`;
+  }
+
+  const logList = container.querySelector('#verifier-log-list');
+  if (logList) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${escapeHtml(msg)}</span>`;
+    logList.appendChild(li);
+  }
+  
+  messagesEl().scrollTop = messagesEl().scrollHeight;
+  return container;
+};
+
+export const updateCognitiveStats = (stats) => {
+  const statTurns = document.getElementById('stat-turns');
+  const statToolCalls = document.getElementById('stat-tool-calls');
+  const statSteps = document.getElementById('stat-steps');
+  const statInputTokens = document.getElementById('stat-input-tokens');
+  const statOutputTokens = document.getElementById('stat-output-tokens');
+  const statBudgetPercentage = document.getElementById('stat-budget-percentage');
+  const statProgressBar = document.getElementById('stat-progress-bar');
+  const statCurrentTokens = document.getElementById('stat-current-tokens');
+  const statMaxTokens = document.getElementById('stat-max-tokens');
+  const triggerPercentage = document.querySelector('.stats-percentage');
+
+  if (statTurns) statTurns.textContent = stats.turns;
+  if (statToolCalls) statToolCalls.textContent = stats.activeToolCalls;
+  
+  const remainingSteps = Math.max(0, stats.maxSteps - stats.steps);
+  if (statSteps) statSteps.textContent = `${stats.steps} / ${stats.maxSteps} (${remainingSteps} remaining)`;
+  
+  if (statInputTokens) statInputTokens.textContent = stats.inputTokens.toLocaleString();
+  if (statOutputTokens) statOutputTokens.textContent = stats.outputTokens.toLocaleString();
+  
+  const totalUsed = stats.inputTokens + stats.outputTokens;
+  const maxTokens = stats.maxTokens || 16000;
+  const percentage = Math.min(100, Math.round((totalUsed / maxTokens) * 100));
+  
+  if (statBudgetPercentage) statBudgetPercentage.textContent = `${percentage}%`;
+  if (triggerPercentage) triggerPercentage.textContent = `${percentage}%`;
+  if (statProgressBar) statProgressBar.style.width = `${percentage}%`;
+  if (statCurrentTokens) statCurrentTokens.textContent = totalUsed.toLocaleString();
+  if (statMaxTokens) statMaxTokens.textContent = `${maxTokens.toLocaleString()} max`;
+};
+
+export const resetCognitiveStats = (maxSteps = 30, maxTokens = 16000) => {
+  updateCognitiveStats({
+    turns: 0,
+    activeToolCalls: 0,
+    steps: 0,
+    maxSteps,
+    inputTokens: 0,
+    outputTokens: 0,
+    maxTokens
+  });
 };

@@ -1,6 +1,6 @@
 import { createBrowserSession, createAdapter } from './agent.js';
 import { getSettings } from './storage.js';
-import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge } from './ui.js';
+import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats } from './ui.js';
 import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
 
@@ -38,6 +38,13 @@ const handleSubmit = async (userText) => {
 
   isRunning = true;
   document.getElementById('btn-send').disabled = true;
+
+  // Clear any prior unified verifier elements so they don't carry over
+  const oldVerifier = document.getElementById('unified-goal-verifier');
+  if (oldVerifier) {
+    oldVerifier.remove();
+  }
+
   renderMessage('user', userText);
   showTyping();
 
@@ -59,10 +66,39 @@ const handleSubmit = async (userText) => {
     }
 
     const message = ctx ? buildMessageWithContext(userText, ctx) : userText;
-    // session.run() appends to context.turns — conversation history is preserved
-    const response = await session.run(message);
-    hideTyping();
-    renderMessage('assistant', typeof response === 'string' ? response : JSON.stringify(response));
+    
+    if (typeof session.stream === 'function') {
+      const responseStream = await session.stream(message);
+
+      let assistantMsgEl = null;
+      let bodyEl = null;
+      let fullText = '';
+      const warningRegex = /---\s*(?:⚠️|⚡|🚨|\u26A0\uFE0F)?\s*\*\*Goal Verification Warning\*\*[\s\S]*$/i;
+
+      for await (const chunk of responseStream) {
+        if (!assistantMsgEl) {
+          hideTyping(); // Clear typing indicator as soon as the first stream chunk arrives!
+          assistantMsgEl = renderMessage('assistant', '');
+          bodyEl = assistantMsgEl.querySelector('.msg-body');
+        }
+        fullText += chunk;
+        if (bodyEl) {
+          bodyEl.innerHTML = renderMarkdown(fullText.replace(warningRegex, '').trim());
+        }
+        // Auto scroll
+        const container = document.getElementById('messages');
+        container.scrollTop = container.scrollHeight;
+      }
+
+      if (assistantMsgEl) {
+        updateAssistantMessage(assistantMsgEl, fullText);
+      }
+    } else {
+      // session.run() appends to context.turns — conversation history is preserved
+      const response = await session.run(message);
+      hideTyping();
+      renderMessage('assistant', typeof response === 'string' ? response : JSON.stringify(response));
+    }
   } catch (err) {
     hideTyping();
     renderMessage('error', `Error: ${err.message}`);
@@ -81,6 +117,7 @@ const clearChat = async () => {
   }
   session = null;
   await initSession();
+  resetCognitiveStats(currentSettings?.maxSteps || 30, currentSettings?.contextWindow || 16000);
   showToast('Chat cleared');
 };
 
@@ -293,5 +330,23 @@ chrome.runtime.onMessage.addListener(({ action, selector }) => {
     }
   });
 });
+
+// ── Session Cognitive Stats Toggle ──
+const btnCognitiveStats = document.getElementById('btn-cognitive-stats');
+const popupCognitiveStats = document.getElementById('cognitive-stats-popup');
+
+if (btnCognitiveStats && popupCognitiveStats) {
+  btnCognitiveStats.addEventListener('click', (e) => {
+    e.stopPropagation();
+    popupCognitiveStats.classList.toggle('hidden');
+  });
+
+  // Click outside to close the popup
+  document.addEventListener('click', (e) => {
+    if (!popupCognitiveStats.classList.contains('hidden') && !popupCognitiveStats.contains(e.target) && e.target !== btnCognitiveStats) {
+      popupCognitiveStats.classList.add('hidden');
+    }
+  });
+}
 
 initSession();

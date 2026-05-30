@@ -298,6 +298,7 @@ export const browserTools = [
   {
     name: 'navigateTo',
     description: 'Navigate the current browser tab to a URL and wait for the page to load. Use this to open a website, social media profile page, or search results URL.',
+    timeoutMs: 45000,
     parameters: {
       type: 'object',
       properties: {
@@ -314,6 +315,7 @@ export const browserTools = [
   {
     name: 'analyzePageVisually',
     description: 'Take a screenshot of the visible page and analyze it using vision/OCR. Use this when: the page content cannot be extracted as text (canvas, image-based UI, PDF viewer, charts), you need to understand visual layout for form filling, or the user asks what they see on screen. Automatically scoped to the active focus region if one is set.',
+    timeoutMs: 60000,
     parameters: {
       type: 'object',
       properties: {
@@ -350,6 +352,7 @@ export const browserTools = [
   {
     name: 'scrollAndRead',
     description: 'Scroll the page down and return the newly visible text. Use this to load and read more posts on infinite-scroll feeds (Twitter, LinkedIn, Facebook, etc.).',
+    timeoutMs: 45000,
     parameters: {
       type: 'object',
       properties: {
@@ -486,6 +489,7 @@ export const browserTools = [
   {
     name: 'readThread',
     description: 'Read all comments or replies in a discussion thread. Automatically clicks "load more" buttons to expand the thread before extracting. Returns structured comment data with author, timestamp, and text. Use this on blog posts, Reddit, YouTube comments, news articles, or any page with a comment section.',
+    timeoutMs: 60000,
     parameters: {
       type: 'object',
       properties: {

@@ -23,6 +23,8 @@ getSettings().then(settings => {
   document.getElementById('parallelToolCalls').checked = settings.parallelToolCalls ?? true;
   document.getElementById('goalInjectionFrequency').value = settings.goalInjectionFrequency ?? 'always';
   document.getElementById('goalInjectionPosition').value = settings.goalInjectionPosition ?? 'system_prompt';
+  document.getElementById('enableGoalVerification').checked = settings.enableGoalVerification ?? false;
+  document.getElementById('staticSystemPrompt').checked = settings.staticSystemPrompt ?? false;
 });
 
 // ── Microphone permission UI ──
@@ -76,7 +78,9 @@ form.addEventListener('submit', async (e) => {
     enableContinuationPlanning: document.getElementById('enableContinuationPlanning').checked,
     parallelToolCalls: document.getElementById('parallelToolCalls').checked,
     goalInjectionFrequency: document.getElementById('goalInjectionFrequency').value,
-    goalInjectionPosition: document.getElementById('goalInjectionPosition').value
+    goalInjectionPosition: document.getElementById('goalInjectionPosition').value,
+    enableGoalVerification: document.getElementById('enableGoalVerification').checked,
+    staticSystemPrompt: document.getElementById('staticSystemPrompt').checked
   });
   statusMsg.classList.remove('hidden');
   setTimeout(() => statusMsg.classList.add('hidden'), 2500);

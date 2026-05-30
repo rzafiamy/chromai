@@ -16,7 +16,9 @@ const DEFAULTS = {
   goalInjectionPosition: 'system_prompt',
   enableContinuationPlanning: false,
   parallelToolCalls: true,
-  maxTokensPerTool: 4000
+  maxTokensPerTool: 4000,
+  staticSystemPrompt: false,
+  enableGoalVerification: false
 };
 
 export async function getSettings() {

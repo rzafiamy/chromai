@@ -9,10 +9,10 @@
     "build:all": "npm run build",
     "lint": "eslint src/"
   },
-  "dependencies": {
-    "lemura": "^1.4.0"
-  },
   "devDependencies": {
     "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "lemura": "^1.5.2"
   }
 }

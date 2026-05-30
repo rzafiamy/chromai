@@ -13,6 +13,6 @@
     "vite": "^5.0.0"
   },
   "dependencies": {
-    "lemura": "file:../../Dev-ai/lemura"
+    "lemura": "^1.5.3"
   }
 }

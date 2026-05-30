@@ -10,8 +10,6 @@ npm run dev      # Watch mode
 
 Output goes to `dist/`. Load `dist/` as an unpacked Chrome extension.
 
-> lemura is installed from local source at `/tmp/lemura-src` (built from `github:rzafiamy/lemura`). The GitHub package ships without `dist/`, so it must be cloned and built separately before `npm install`.
-
 ## Architecture
 
 Three isolated Chrome extension contexts communicate via `chrome.runtime` message passing:

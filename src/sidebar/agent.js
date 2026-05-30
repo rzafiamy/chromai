@@ -34,6 +34,31 @@ ${completed.map((sg) => `- \u2705 ${sg}`).join("\n")}
 }
 
 if (SessionManager && SessionManager.prototype) {
+  const origRunMiniPlanningStep = SessionManager.prototype._runMiniPlanningStep;
+  SessionManager.prototype._runMiniPlanningStep = function (userMessage) {
+    let cleanGoal = userMessage;
+    if (typeof userMessage === 'string') {
+      if (userMessage.includes('[PAGE CONTEXT') && userMessage.includes('[END PAGE CONTEXT]')) {
+        // Extract user intent
+        const userText = userMessage.split('[END PAGE CONTEXT]').pop().trim();
+        
+        // Extract Title if present to give page context without the DOM noise
+        const titleMatch = userMessage.match(/Title:\s*([^\n]+)/);
+        if (titleMatch && titleMatch[1]) {
+          cleanGoal = `"${userText}" on the page titled "${titleMatch[1].trim()}"`;
+        } else {
+          cleanGoal = userText;
+        }
+      }
+    }
+    
+    if (this.goalInjector && cleanGoal !== userMessage) {
+      this.goalInjector.goal.statement = cleanGoal;
+    }
+    
+    return origRunMiniPlanningStep.call(this, cleanGoal);
+  };
+
   const origBuildSystemPrompt = SessionManager.prototype.buildSystemPrompt;
   SessionManager.prototype.buildSystemPrompt = function (...args) {
     const res = origBuildSystemPrompt.apply(this, args);
@@ -189,13 +214,12 @@ export const createBrowserSession = ({ settings }) => {
       session.cognitiveStats.turns = session.context?.turns?.filter(t => t.role === 'user').length ?? 0;
       session.cognitiveStats.steps = session.stepCounter?.count ?? 0;
       
-      // Fallback: estimate tokens if API metadata didn't provide them
-      if (session.cognitiveStats.inputTokens === 0 && session.context) {
-        const userTurns = session.context.turns?.filter(t => t.role === 'user') ?? [];
+      if (session.context) {
+        const systemPromptTokens = session.adapter?.estimateTokens?.(session.context.systemPrompt || '') ?? 0;
+        const inputTurns = session.context.turns?.filter(t => t.role === 'user' || t.role === 'tool' || t.role === 'system') ?? [];
         const assistantTurns = session.context.turns?.filter(t => t.role === 'assistant') ?? [];
         
-        const estInput = userTurns.reduce((sum, t) => sum + (t.tokenCount ?? 0), 0) + 
-                         (session.adapter?.estimateTokens?.(session.context.systemPrompt || '') ?? 0);
+        const estInput = inputTurns.reduce((sum, t) => sum + (t.tokenCount ?? 0), 0) + systemPromptTokens;
         const estOutput = assistantTurns.reduce((sum, t) => sum + (t.tokenCount ?? 0), 0);
         
         session.cognitiveStats.inputTokens = estInput;
@@ -243,9 +267,7 @@ export const createBrowserSession = ({ settings }) => {
           lastThinkingDiv = showThinkingText(event.output);
         }
         
-        if (event.status === 'done' && event.metadata?.usage && session && session.cognitiveStats) {
-          session.cognitiveStats.inputTokens += event.metadata.usage.promptTokens ?? 0;
-          session.cognitiveStats.outputTokens += event.metadata.usage.completionTokens ?? 0;
+        if (event.status === 'done' && session && session.cognitiveStats) {
           refreshStats();
         }
       } else if (event.name === 'llm_stream_finished') {
@@ -254,9 +276,7 @@ export const createBrowserSession = ({ settings }) => {
           showStopReason(reason, lastThinkingDiv);
         }
         
-        if (event.metadata?.usage && session && session.cognitiveStats) {
-          session.cognitiveStats.inputTokens += event.metadata.usage.promptTokens ?? 0;
-          session.cognitiveStats.outputTokens += event.metadata.usage.completionTokens ?? 0;
+        if (session && session.cognitiveStats) {
           refreshStats();
         }
       }

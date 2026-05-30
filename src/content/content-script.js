@@ -1002,6 +1002,96 @@ const handlers = {
     return { query, matches, count: matches.length };
   },
 
+  // Fire a full mouse/pointer event sequence at the given viewport coordinates.
+  // Uses elementFromPoint to find the real target — works for canvas UIs, CSS-transformed
+  // elements, and anything that only responds to real pointer events (not synthetic clicks
+  // routed through a CSS selector).
+  async CLICK_AT_COORDINATES({ x, y, waitAfterMs = 500 } = {}) {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return { success: false, error: `No element at (${x}, ${y})` };
+
+    const dialogsBefore = querySelectorAllDeep(
+      '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]'
+    ).filter(isVisible).length;
+
+    el.focus?.();
+
+    const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y };
+    el.dispatchEvent(new PointerEvent('pointerover', opts));
+    el.dispatchEvent(new MouseEvent('mouseover', opts));
+    el.dispatchEvent(new PointerEvent('pointerenter', { ...opts, bubbles: false }));
+    el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, bubbles: false }));
+    el.dispatchEvent(new PointerEvent('pointermove', opts));
+    el.dispatchEvent(new MouseEvent('mousemove', opts));
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, button: 0, buttons: 1 }));
+    el.dispatchEvent(new MouseEvent('mousedown', { ...opts, button: 0, buttons: 1 }));
+    el.dispatchEvent(new PointerEvent('pointerup', { ...opts, button: 0 }));
+    el.dispatchEvent(new MouseEvent('mouseup', { ...opts, button: 0 }));
+    el.dispatchEvent(new MouseEvent('click', { ...opts, button: 0 }));
+
+    await new Promise(r => setTimeout(r, waitAfterMs));
+
+    const dialogsAfter = querySelectorAllDeep(
+      '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]'
+    ).filter(isVisible).length;
+    const openedDialog = dialogsAfter > dialogsBefore ? detectOpenDialog() : null;
+
+    const selector = buildSelector(el);
+    return {
+      success: true,
+      x, y,
+      tag: el.tagName.toLowerCase(),
+      label: accessibleName(el).slice(0, 80),
+      selector,
+      ...(openedDialog ? { openedDialog } : {})
+    };
+  },
+
+  // Return the list of labeled interactive elements that will appear in a labeled
+  // screenshot. The actual image drawing is done in the sidebar (OffscreenCanvas is
+  // not available in content scripts). Returns each element's label index, accessible
+  // name, selector, and viewport rect so the sidebar can draw the overlay.
+  GET_LABELED_ELEMENTS({ rootSelector, maxElements = 60 } = {}) {
+    const root = rootSelector ? document.querySelector(rootSelector) : null;
+    const INTERACTIVE = 'a[href], button, input:not([type=hidden]), select, textarea, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [role="textbox"], [role="combobox"], [role="switch"], [role="option"], [onclick], [tabindex]:not([tabindex="-1"])';
+
+    const seen = new Set();
+    const elements = querySelectorAllDeep(INTERACTIVE, root || document)
+      .filter(el => {
+        if (seen.has(el)) return false;
+        seen.add(el);
+        return isVisible(el);
+      })
+      .slice(0, maxElements)
+      .map((el, i) => {
+        const r = el.getBoundingClientRect();
+        return {
+          index: i + 1,
+          tag: el.tagName.toLowerCase(),
+          type: el.isContentEditable ? 'contenteditable' : (el.type || el.getAttribute('role') || null),
+          selector: buildSelector(el),
+          label: accessibleName(el).slice(0, 80),
+          href: el.href || null,
+          rect: {
+            x: Math.round(r.x), y: Math.round(r.y),
+            w: Math.round(r.width), h: Math.round(r.height),
+            cx: Math.round(r.x + r.width / 2), cy: Math.round(r.y + r.height / 2)
+          }
+        };
+      })
+      .filter(e => e.selector && e.rect.w > 0 && e.rect.h > 0);
+
+    return {
+      count: elements.length,
+      elements,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        dpr: window.devicePixelRatio || 1
+      }
+    };
+  },
+
   async READ_THREAD({ selector, maxComments = 30, loadMoreSelector, waitMs = 1000 } = {}) {
     const root = selector ? document.querySelector(selector) : document.body;
     if (selector && !root) return { error: `Selector not found: ${selector}`, comments: [] };

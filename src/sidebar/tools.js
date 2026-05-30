@@ -565,6 +565,118 @@ export const browserTools = [
   },
 
   {
+    name: 'getLabeledScreenshot',
+    description: 'Take a screenshot of the current page with numbered bounding-box overlays drawn on every interactive element (Set-of-Marks style). Returns the annotated image and a lookup table mapping each number to the element\'s selector, label, tag, and center coordinates. Use this when: (1) DOM selectors are unreliable or you are unsure which element to click; (2) the page has a complex visual layout; (3) you want to show the user what is on screen with clear labels. After calling this, refer to elements by their number and use clickAtCoordinates to click them.',
+    timeoutMs: 60000,
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Optional: what to focus on in the analysis (e.g. "find the login button", "list all navigation links"). If omitted a general layout description is returned.' },
+        maxElements: { type: 'number', description: 'Maximum number of interactive elements to label (default 60)' }
+      }
+    },
+    execute: async (p, context) => {
+      const { adapter } = context ?? {};
+      if (!adapter) throw new Error('getLabeledScreenshot requires a provider adapter in tool context');
+
+      // 1. Get element list + rects from content script
+      const rootSelector = _focusRegion || undefined;
+      const elemData = await sendToContentScript('GET_LABELED_ELEMENTS', {
+        rootSelector,
+        maxElements: p?.maxElements || 60
+      });
+
+      // 2. Screenshot the page (cropped to focus region if active)
+      let dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 85 });
+      if (_focusRegion) {
+        try {
+          const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: _focusRegion, scrollIntoView: false });
+          if (rectResult?.success && rectResult.rect?.pw > 0) {
+            dataUrl = 'data:image/jpeg;base64,' + await cropScreenshot(dataUrl, rectResult.rect);
+          }
+        } catch { /* use full screenshot */ }
+      }
+
+      // 3. Draw numbered overlays onto the screenshot using OffscreenCanvas
+      const blob = await fetch(dataUrl).then(r => r.blob());
+      const bitmap = await createImageBitmap(blob);
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0);
+
+      // DPR from content script viewport — bitmap.width = viewport.width * dpr
+      const dpr = elemData.viewport
+        ? (bitmap.width / elemData.viewport.width)
+        : 1;
+
+      for (const el of elemData.elements) {
+        const { x, y, w, h } = el.rect;
+        const px = x * dpr, py = y * dpr, pw = w * dpr, ph = h * dpr;
+
+        // Box outline
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = Math.max(1.5, dpr);
+        ctx.strokeRect(px, py, pw, ph);
+
+        // Label badge background
+        const fontSize = Math.round(11 * dpr);
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        const label = String(el.index);
+        const textW = ctx.measureText(label).width;
+        const padX = 4 * dpr, padY = 3 * dpr;
+        const badgeW = textW + padX * 2;
+        const badgeH = fontSize + padY * 2;
+        ctx.fillStyle = '#6366f1';
+        ctx.fillRect(px, py - badgeH, badgeW, badgeH);
+
+        // Label text
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, px + padX, py - padY);
+      }
+
+      const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.88 });
+      const buf = await outBlob.arrayBuffer();
+      const imageBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+      // 4. Send annotated image to vision model
+      const userPrompt = p?.prompt ||
+        'This is a labeled screenshot of a web page. Numbered boxes mark every interactive element. ' +
+        'Describe the page layout and list the most important controls with their label numbers.';
+
+      const result = await adapter.describeImage({ imageBase64, prompt: userPrompt });
+
+      return {
+        analysis: result.description,
+        elementCount: elemData.count,
+        elements: elemData.elements,   // full lookup table for clickAtCoordinates
+        focusRegion: _focusRegion || null
+      };
+    }
+  },
+
+  {
+    name: 'clickAtCoordinates',
+    description: 'Click at a specific (x, y) viewport coordinate by firing a full mouse/pointer event sequence at that exact pixel position. Use this when: (1) a selector-based click fails or the element has no reliable selector; (2) the target is inside a canvas or heavily transformed container; (3) you got the coordinates from getLabeledScreenshot (use the element\'s cx/cy from the elements list). More reliable than clickElement for canvas-rendered UIs, custom web components, and hover-only menus.',
+    parameters: {
+      type: 'object',
+      properties: {
+        x: { type: 'number', description: 'Horizontal viewport coordinate in CSS pixels (0 = left edge)' },
+        y: { type: 'number', description: 'Vertical viewport coordinate in CSS pixels (0 = top edge)' },
+        waitAfterMs: { type: 'number', description: 'Milliseconds to wait after the click for the page to update (default 500)' }
+      },
+      required: ['x', 'y']
+    },
+    execute: async ({ x, y, waitAfterMs = 500 }) => {
+      const result = await sendToContentScript('CLICK_AT_COORDINATES', { x, y, waitAfterMs });
+      if (result?.openedDialog && _focusRegion && result.openedDialog !== _focusRegion) {
+        setFocusRegion(result.openedDialog);
+        _onRegionAutoExpand?.(result.openedDialog);
+      }
+      return result;
+    }
+  },
+
+  {
     name: 'readThread',
     description: 'Read all comments or replies in a discussion thread. Automatically clicks "load more" buttons to expand the thread before extracting. Returns structured comment data with author, timestamp, and text. Use this on blog posts, Reddit, YouTube comments, news articles, or any page with a comment section.',
     timeoutMs: 60000,

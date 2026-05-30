@@ -1,5 +1,5 @@
 import { createBrowserSession, createAdapter } from './agent.js';
-import { getSettings } from './storage.js';
+import { getSettings, saveHistory, loadHistory, clearHistory } from './storage.js';
 import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats, setSendButtonState } from './ui.js';
 import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion, setOnRegionAutoExpand } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
@@ -10,15 +10,18 @@ let isRunning = false;
 let currentSettings = null;
 let isPickerActive = false;
 
-const initSession = async () => {
+const initSession = async (restoreHistory = true) => {
   currentSettings = await getSettings();
   if (!currentSettings.apiKey) {
     renderMessage('system', '⚙ No API key configured. Click the settings icon to add your API key.');
     return null;
   }
-  // Reuse existing session if settings haven't changed (preserves conversation history)
   session = createBrowserSession({ settings: currentSettings });
   updateModelBadge(currentSettings.model);
+  if (restoreHistory) {
+    const history = await loadHistory();
+    if (history.length > 0) session.loadHistory(history);
+  }
   return session;
 };
 
@@ -119,6 +122,8 @@ const handleSubmit = async (userText) => {
       hideTyping();
       renderMessage('assistant', typeof response === 'string' ? response : JSON.stringify(response));
     }
+    // Persist turns so history survives sidebar reload
+    saveHistory(session.context?.turns ?? []);
   } catch (err) {
     hideTyping();
     if (isAbortError(err)) {
@@ -140,12 +145,12 @@ const handleSubmit = async (userText) => {
 
 const clearChat = async () => {
   document.getElementById('messages').innerHTML = '';
-  // Reset session so next message starts fresh
   if (session) {
     try { session.reset(); } catch { /* ignore */ }
   }
   session = null;
-  await initSession();
+  await clearHistory();
+  await initSession(false);
   resetCognitiveStats(currentSettings?.maxSteps || 30, currentSettings?.contextWindow || 16000);
   showToast('Chat cleared');
 };
@@ -363,6 +368,7 @@ chrome.runtime.onMessage.addListener(({ action, selector }) => {
     try { session.reset(); } catch { /* ignore */ }
     session = null;
   }
+  clearHistory();
   getSettings().then((s) => {
     currentSettings = s;
     if (s.apiKey) {

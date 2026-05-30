@@ -470,6 +470,38 @@ export const browserTools = [
   },
 
   {
+    name: 'ocrRegion',
+    description: 'Extract the exact visible text from a specific element or region by converting it to an image and running OCR. Use this when the region contains image-rendered text, canvas-drawn text, PDF content, or any text that cannot be selected or copied normally. Returns the raw transcribed text as-is, without interpretation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector of the element to OCR (e.g. "#invoice-preview", ".pdf-page", "canvas.chart-label")' }
+      },
+      required: ['selector']
+    },
+    execute: async (p, context) => {
+      const { adapter } = context ?? {};
+      if (!adapter) throw new Error('OCR requires a provider adapter in tool context');
+
+      const rectResult = await sendToContentScript('GET_ELEMENT_RECT', { selector: p.selector, scrollIntoView: true });
+      if (!rectResult.success) throw new Error(rectResult.error);
+
+      await new Promise(r => setTimeout(r, 300));
+
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 95 });
+      const imageBase64 = await cropScreenshot(dataUrl, rectResult.rect);
+
+      const prompt =
+        'Transcribe every character of text visible in this image exactly as it appears. ' +
+        'Preserve line breaks, spacing, punctuation, numbers, and special characters faithfully. ' +
+        'Do not summarize, interpret, or add any commentary — output only the raw transcribed text.';
+
+      const result = await adapter.describeImage({ imageBase64, prompt });
+      return { selector: p.selector, rect: rectResult.rect, text: result.description };
+    }
+  },
+
+  {
     name: 'writeToRegion',
     description: 'Write text into the editable element (contenteditable, textarea, or input) inside a focus region. Use this — not typeText or fillForm — when a FOCUS REGION is active and the user asks to write, compose, draft, or fill content. Works reliably on complex rich-text editors (LinkedIn, Twitter, Notion, Slack).',
     parameters: {

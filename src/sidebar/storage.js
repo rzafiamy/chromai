@@ -32,3 +32,29 @@ export async function saveSettings(patch) {
     chrome.storage.sync.set(patch, resolve);
   });
 }
+
+const HISTORY_KEY = 'chromai_chat_history';
+const MAX_HISTORY_TURNS = 40;
+
+export async function saveHistory(turns) {
+  // Persist only role + content (skip internal lemura metadata)
+  const serializable = turns
+    .filter(t => t.role === 'user' || t.role === 'assistant')
+    .slice(-MAX_HISTORY_TURNS)
+    .map(t => ({ role: t.role, content: t.content }));
+  return new Promise(resolve => {
+    chrome.storage.session.set({ [HISTORY_KEY]: serializable }, resolve);
+  });
+}
+
+export async function loadHistory() {
+  return new Promise(resolve => {
+    chrome.storage.session.get({ [HISTORY_KEY]: [] }, (r) => resolve(r[HISTORY_KEY]));
+  });
+}
+
+export async function clearHistory() {
+  return new Promise(resolve => {
+    chrome.storage.session.remove(HISTORY_KEY, resolve);
+  });
+}

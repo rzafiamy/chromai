@@ -1,7 +1,7 @@
 import { createBrowserSession, createAdapter } from './agent.js';
 import { getSettings } from './storage.js';
 import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats, setSendButtonState } from './ui.js';
-import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion } from './tools.js';
+import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion, setOnRegionAutoExpand } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
 import { isAbortError } from './abort.js';
 
@@ -323,6 +323,14 @@ const clearFocusRegion = async () => {
   updatePickerUI();
   await injectAndSend('CLEAR_REGION_HIGHLIGHT').catch(() => {});
 };
+
+// When a click during an agent run opens a dialog outside the focus region,
+// tools.js re-points the region to that dialog. Refresh the pill + highlight here.
+setOnRegionAutoExpand((selector) => {
+  updatePickerUI();
+  showToast(`Focus region followed dialog: ${selector}`);
+  injectAndSend('HIGHLIGHT_REGION', { selector }).catch(() => {});
+});
 
 document.getElementById('btn-pick-region').addEventListener('click', () => {
   if (isPickerActive) cancelPicker();

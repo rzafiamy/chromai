@@ -683,12 +683,21 @@ code.inline-code {
 }
 
 /* ── Confirmation card ── */
+/* ── Confirm overlay — floats above chat, below input bar ── */
+.confirm-overlay {
+  padding: 8px 10px;
+  border-top: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(10, 10, 20, 0.6);
+  backdrop-filter: blur(4px);
+  flex-shrink: 0;
+}
+.confirm-overlay.hidden { display: none; }
+
 .confirm-card {
   background: #1a1830;
   border: 1px solid var(--warning);
   border-radius: 10px;
   padding: 12px 14px;
-  margin: 6px 0;
   font-size: 12px;
 }
 .confirm-header {
@@ -698,11 +707,13 @@ code.inline-code {
   margin-bottom: 6px;
   color: var(--warning);
   font-size: 12px;
+  font-weight: 600;
 }
 .confirm-body {
   color: var(--text);
   margin-bottom: 8px;
   line-height: 1.5;
+  font-size: 12px;
 }
 .confirm-detail {
   display: block;
@@ -712,28 +723,69 @@ code.inline-code {
   color: #a5b4fc;
   font-size: 11px;
   font-family: var(--font-mono);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   word-break: break-all;
   border: 1px solid var(--border);
+  max-height: 60px;
+  overflow-y: auto;
 }
 .confirm-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  margin-top: 10px;
 }
 .confirm-btn {
   border: none;
   border-radius: 7px;
-  padding: 5px 14px;
+  padding: 6px 16px;
   font-size: 12px;
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 600;
   transition: opacity 0.15s;
   font-family: var(--font);
 }
 .confirm-btn:hover { opacity: 0.82; }
 .confirm-cancel { background: var(--bg4); color: var(--text); border: 1px solid var(--border); }
 .confirm-ok { background: linear-gradient(135deg, var(--accent), var(--purple)); color: white; }
+.confirm-ok:focus-visible,
+.confirm-ok:focus { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* When the target element could NOT be located — escalate visual danger */
+.confirm-card--not-found {
+  border-color: rgba(220, 38, 38, 0.7);
+}
+.confirm-card--not-found .confirm-header {
+  color: #fca5a5;
+}
+.confirm-card--not-found .confirm-header svg { stroke: #fca5a5; }
+.confirm-card--not-found .confirm-ok {
+  background: linear-gradient(135deg, #b45309, #dc2626);
+  position: relative;
+}
+.confirm-card--not-found .confirm-ok::before {
+  content: '⚠ ';
+  font-style: normal;
+}
+.confirm-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.confirm-hint::before { content: '🔴'; }
+.confirm-warning {
+  font-size: 11px;
+  color: #fca5a5;
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid rgba(220, 38, 38, 0.4);
+  border-radius: 5px;
+  padding: 5px 8px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
 
 /* ── Agent traceability ────────────────────────────────────────────────────── */
 

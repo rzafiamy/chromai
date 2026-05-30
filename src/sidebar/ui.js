@@ -177,11 +177,11 @@ export const showTyping = () => {
 
 export const hideTyping = () => typingEl()?.remove();
 
-export const showConfirm = ({ toolName, description, detail, abortHandle }) =>
+export const showConfirm = ({ toolName, description, detail, notFound = false, abortHandle }) =>
   new Promise((resolve) => {
-    const container = messagesEl();
+    const overlay = document.getElementById('confirm-overlay');
     const card = document.createElement('div');
-    card.className = 'confirm-card';
+    card.className = notFound ? 'confirm-card confirm-card--not-found' : 'confirm-card';
     card.innerHTML = `
       <div class="confirm-header">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -189,6 +189,9 @@ export const showConfirm = ({ toolName, description, detail, abortHandle }) =>
       </div>
       <div class="confirm-body">${escapeHtml(description)}</div>
       ${detail ? `<code class="confirm-detail">${escapeHtml(detail)}</code>` : ''}
+      ${notFound
+        ? `<div class="confirm-warning">⚠ Could not locate this element on the page — it may have changed. Confirm only if you understand the action.</div>`
+        : `<div class="confirm-hint">The target is outlined in red on the page.</div>`}
       <div class="confirm-actions">
         <button class="confirm-btn confirm-cancel">Cancel</button>
         <button class="confirm-btn confirm-ok">Confirm</button>
@@ -201,12 +204,23 @@ export const showConfirm = ({ toolName, description, detail, abortHandle }) =>
       if (settled) return;
       settled = true;
       unsubscribe();
+      document.removeEventListener('keydown', onKey, true);
       card.remove();
+      overlay.classList.add('hidden');
       resolve(value);
     };
 
-    card.querySelector('.confirm-ok').addEventListener('click', () => finish(true));
+    const okBtn = card.querySelector('.confirm-ok');
+    okBtn.addEventListener('click', () => finish(true));
     card.querySelector('.confirm-cancel').addEventListener('click', () => finish(false));
+
+    // Keyboard: Enter confirms, Escape cancels — so the user never has to "click
+    // dumbly". Capture phase so it wins over page handlers.
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+    document.addEventListener('keydown', onKey, true);
 
     // Pressing Stop while this modal is open must dismiss it and deny the action,
     // otherwise the agent stays parked forever inside the firewall's onAsk().
@@ -215,8 +229,10 @@ export const showConfirm = ({ toolName, description, detail, abortHandle }) =>
       unsubscribe = abortHandle.onAbort(() => finish(false));
     }
 
-    container.appendChild(card);
-    container.scrollTop = container.scrollHeight;
+    overlay.innerHTML = '';
+    overlay.appendChild(card);
+    overlay.classList.remove('hidden');
+    okBtn.focus();
   });
 
 const TOOL_ICONS = {

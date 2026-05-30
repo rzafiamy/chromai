@@ -4,10 +4,17 @@
 import { AbortError } from './abort.js';
 
 // Global focus region — set by the element picker in the sidebar.
-// When non-null, content-reading tools scope their results to this CSS selector.
+// When non-null, content-reading tools scope their results to this CSS selector,
+// and action tools resolve selectors inside it first (falling back to the whole
+// page so portaled dialogs still work — see resolveActionTarget in the content script).
 let _focusRegion = null;
 export const setFocusRegion = (selector) => { _focusRegion = selector; };
 export const getFocusRegion = () => _focusRegion;
+
+// Sidebar hook fired when a click auto-expands the focus region to a dialog that
+// opened outside it. The sidebar registers this to refresh its pill + highlight.
+let _onRegionAutoExpand = null;
+export const setOnRegionAutoExpand = (fn) => { _onRegionAutoExpand = fn; };
 
 // Active abort handle for the running agent. Set by agent.js per run so that tool
 // calls stop firing the moment the user presses Stop, rather than draining the
@@ -24,7 +31,7 @@ const getActiveTab = async () => {
 
 const isNoReceiverError = (msg) => msg?.includes('Receiving end does not exist') || msg?.includes('Could not establish connection');
 
-const injectContentScript = (tabId) =>
+export const injectContentScript = (tabId) =>
   chrome.scripting.executeScript({ target: { tabId }, files: ['content/content-script.js'] });
 
 const sendMessage = (tabId, payload) =>
@@ -206,7 +213,16 @@ export const browserTools = [
       },
       required: ['selector']
     },
-    execute: ({ selector, waitAfterMs = 500 }) => sendToContentScript('CLICK_ELEMENT', { selector, waitAfterMs })
+    execute: async ({ selector, waitAfterMs = 500 }) => {
+      const result = await sendToContentScript('CLICK_ELEMENT', { selector, waitAfterMs, rootSelector: _focusRegion || undefined });
+      // Auto-expand the focus region to a dialog the click just opened (it was
+      // portaled outside the region, so the agent now needs to act inside it).
+      if (result?.openedDialog && _focusRegion && result.openedDialog !== _focusRegion) {
+        setFocusRegion(result.openedDialog);
+        _onRegionAutoExpand?.(result.openedDialog);
+      }
+      return result;
+    }
   },
 
   {
@@ -230,7 +246,7 @@ export const browserTools = [
       },
       required: ['fields']
     },
-    execute: ({ fields }) => sendToContentScript('FILL_FORM', { fields })
+    execute: ({ fields }) => sendToContentScript('FILL_FORM', { fields, rootSelector: _focusRegion || undefined })
   },
 
   {
@@ -243,7 +259,7 @@ export const browserTools = [
       },
       required: ['selector']
     },
-    execute: ({ selector }) => sendToContentScript('SUBMIT_FORM', { selector })
+    execute: ({ selector }) => sendToContentScript('SUBMIT_FORM', { selector, rootSelector: _focusRegion || undefined })
   },
 
   {
@@ -260,7 +276,8 @@ export const browserTools = [
     execute: (p) => sendToContentScript('SCROLL_PAGE', {
       direction: p?.direction || 'down',
       amount: p?.amount || 500,
-      selector: p?.selector
+      selector: p?.selector,
+      rootSelector: _focusRegion || undefined
     })
   },
 
@@ -274,7 +291,7 @@ export const browserTools = [
       },
       required: ['selector']
     },
-    execute: ({ selector }) => sendToContentScript('HIGHLIGHT_ELEMENT', { selector })
+    execute: ({ selector }) => sendToContentScript('HIGHLIGHT_ELEMENT', { selector, rootSelector: _focusRegion || undefined })
   },
 
   {
@@ -397,7 +414,7 @@ export const browserTools = [
       required: ['selector', 'text']
     },
     execute: ({ selector, text, clearFirst = false, pressEnter = false }) =>
-      sendToContentScript('TYPE_TEXT', { selector, text, clearFirst, pressEnter })
+      sendToContentScript('TYPE_TEXT', { selector, text, clearFirst, pressEnter, rootSelector: _focusRegion || undefined })
   },
 
   {
@@ -417,7 +434,7 @@ export const browserTools = [
       required: ['key']
     },
     execute: ({ selector, key, modifiers = [] }) =>
-      sendToContentScript('PRESS_KEY', { selector, key, modifiers })
+      sendToContentScript('PRESS_KEY', { selector, key, modifiers, rootSelector: _focusRegion || undefined })
   },
 
   {

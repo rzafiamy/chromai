@@ -15,7 +15,7 @@ import {
   updateCognitiveStats
 } from './ui.js';
 import { buildSystemPrompt } from './prompt.js';
-import { describeToolCall, highlightOnPage } from './skills.js';
+import { describeToolCall, selectorsForToolCall, showConfirmHighlight, clearConfirmHighlight } from './skills.js';
 import { AbortHandle, AbortError } from './abort.js';
 import { setAbortHandle } from './tools.js';
 
@@ -33,14 +33,28 @@ const makeFirewall = (getHandle) => ({
     const abortHandle = getHandle();
     // If the user already pressed Stop, never raise a modal — deny straight away.
     if (abortHandle.aborted) return false;
-    try {
-      const { selector, fields } = JSON.parse(argsJson);
-      const target = selector ?? fields?.[0]?.selector;
-      if (target) await highlightOnPage(target);
-    } catch { /* ignore */ }
+
+    // Mark the exact element(s) this action will touch with a persistent red,
+    // pulsing border and scroll the first one into view — so the user can SEE
+    // what they're approving instead of confirming blind. Stays up for the whole
+    // decision; cleared once the modal settles (confirm / cancel / Stop).
+    const selectors = selectorsForToolCall(toolName, argsJson);
+    const highlighted = await showConfirmHighlight(selectors);
+
     const { description, detail } = describeToolCall(toolName, argsJson);
-    // showConfirm resolves false the instant Stop is pressed (abort-aware modal).
-    return showConfirm({ toolName, description, detail, abortHandle: getHandle() });
+    try {
+      // showConfirm resolves false the instant Stop is pressed (abort-aware modal).
+      return await showConfirm({
+        toolName,
+        description,
+        detail,
+        // Warn the user if we couldn't locate the target so they don't approve blind.
+        notFound: selectors.length > 0 && highlighted === 0,
+        abortHandle: getHandle()
+      });
+    } finally {
+      await clearConfirmHighlight();
+    }
   }
 });
 

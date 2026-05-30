@@ -30,6 +30,35 @@ function querySelectorAllDeep(selector, root = document) {
   return results;
 }
 
+// Region-aware element resolution for ACTION tools (click/type/fill/etc.).
+// When a focus region is active, resolve the selector inside the region root
+// first; if it isn't there — e.g. a modal portaled to document.body — fall back
+// to the whole document. Returns { el, scope } where scope is 'region' | 'page'
+// | null, so callers can tell the agent which scope actually matched.
+function resolveActionTarget(selector, rootSelector) {
+  if (rootSelector) {
+    const root = querySelectorDeep(rootSelector);
+    if (root) {
+      const scoped = querySelectorDeep(selector, root);
+      if (scoped) return { el: scoped, scope: 'region' };
+    }
+  }
+  const el = querySelectorDeep(selector);
+  return { el, scope: el ? 'page' : null };
+}
+
+// After an action opens a modal, find the top-most dialog so the sidebar can
+// auto-expand the focus region to it. Returns a stable selector or null.
+function detectOpenDialog() {
+  const dialogs = querySelectorAllDeep(
+    '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]'
+  ).filter(isVisible);
+  if (!dialogs.length) return null;
+  // Prefer the last-rendered (top-most) dialog in document order.
+  const dialog = dialogs[dialogs.length - 1];
+  return buildSelector(dialog) || null;
+}
+
 // ── Shared element helpers ────────────────────────────────────────────────────
 // Centralized so every tool (interactive elements, forms, page context, action
 // button finder) produces the SAME stable selectors and accessible names. This
@@ -208,9 +237,14 @@ const handlers = {
     return { rows };
   },
 
-  async CLICK_ELEMENT({ selector, waitAfterMs = 500 } = {}) {
-    const el = querySelectorDeep(selector);
+  async CLICK_ELEMENT({ selector, waitAfterMs = 500, rootSelector } = {}) {
+    const { el, scope } = resolveActionTarget(selector, rootSelector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
+
+    // Snapshot dialogs present before the click so we only report newly-opened ones.
+    const dialogsBefore = querySelectorAllDeep(
+      '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]'
+    ).filter(isVisible).length;
 
     el.focus();
 
@@ -233,10 +267,23 @@ const handlers = {
     el.click(); // native click as final step
 
     await new Promise(r => setTimeout(r, waitAfterMs));
-    return { success: true, clicked: el.innerText?.trim().slice(0, 80) || el.tagName };
+
+    // If the click opened a new dialog (commonly portaled outside the focus
+    // region), surface it so the sidebar can auto-expand the region to it.
+    const dialogsAfter = querySelectorAllDeep(
+      '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]'
+    ).filter(isVisible).length;
+    const openedDialog = dialogsAfter > dialogsBefore ? detectOpenDialog() : null;
+
+    return {
+      success: true,
+      clicked: el.innerText?.trim().slice(0, 80) || el.tagName,
+      scope,
+      ...(openedDialog ? { openedDialog } : {})
+    };
   },
 
-  FILL_FORM({ fields = [] } = {}) {
+  FILL_FORM({ fields = [], rootSelector } = {}) {
     function fillOne(el, value) {
       el.focus();
 
@@ -267,11 +314,11 @@ const handlers = {
 
     const results = [];
     for (const { selector, value } of fields) {
-      const el = querySelectorDeep(selector);
+      const { el, scope } = resolveActionTarget(selector, rootSelector);
       if (!el) { results.push({ selector, success: false, error: 'Not found' }); continue; }
       try {
         fillOne(el, value);
-        results.push({ selector, success: true });
+        results.push({ selector, success: true, scope });
       } catch (e) {
         results.push({ selector, success: false, error: e.message });
       }
@@ -279,8 +326,8 @@ const handlers = {
     return { filled: results.filter(r => r.success).length, results };
   },
 
-  SUBMIT_FORM({ selector } = {}) {
-    const el = querySelectorDeep(selector);
+  SUBMIT_FORM({ selector, rootSelector } = {}) {
+    const { el } = resolveActionTarget(selector, rootSelector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
 
     // 1. Explicit <form> submit
@@ -312,9 +359,9 @@ const handlers = {
     return { success: true, method: 'enter-keydown' };
   },
 
-  SCROLL_PAGE({ direction = 'down', amount = 500, selector } = {}) {
+  SCROLL_PAGE({ direction = 'down', amount = 500, selector, rootSelector } = {}) {
     if (selector) {
-      const el = querySelectorDeep(selector);
+      const { el } = resolveActionTarget(selector, rootSelector);
       if (!el) return { success: false, error: `Element not found: ${selector}` };
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return { success: true, method: 'scrollIntoView' };
@@ -329,8 +376,8 @@ const handlers = {
     return { success: true, direction, amount };
   },
 
-  HIGHLIGHT_ELEMENT({ selector, color = '#ff6b35' } = {}) {
-    const el = querySelectorDeep(selector);
+  HIGHLIGHT_ELEMENT({ selector, color = '#ff6b35', rootSelector } = {}) {
+    const { el } = resolveActionTarget(selector, rootSelector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
     const prev = el.style.outline;
     el.style.outline = `3px solid ${color}`;
@@ -500,8 +547,8 @@ const handlers = {
     };
   },
 
-  async TYPE_TEXT({ selector, text, clearFirst = false, pressEnter = false } = {}) {
-    const el = querySelectorDeep(selector);
+  async TYPE_TEXT({ selector, text, clearFirst = false, pressEnter = false, rootSelector } = {}) {
+    const { el } = resolveActionTarget(selector, rootSelector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
     el.focus();
 
@@ -556,8 +603,8 @@ const handlers = {
     return { success: true, typed: text.length, value: finalValue };
   },
 
-  PRESS_KEY({ selector, key, modifiers = [] } = {}) {
-    const target = selector ? querySelectorDeep(selector) : document.activeElement;
+  PRESS_KEY({ selector, key, modifiers = [], rootSelector } = {}) {
+    const target = selector ? resolveActionTarget(selector, rootSelector).el : document.activeElement;
     if (selector && !target) return { success: false, error: `Element not found: ${selector}` };
     const opts = {
       key,
@@ -1204,6 +1251,103 @@ function _clearRegionHighlight() {
   _regionHighlightSelector = null;
 }
 
+// ── Confirm highlight ──────────────────────────────────────────────────────────
+// Persistent RED overlay shown while the firewall confirm modal is open, so the
+// user can see exactly which element(s) the pending action will touch. Unlike
+// HIGHLIGHT_ELEMENT it does NOT auto-clear — it stays until CLEAR_CONFIRM_HIGHLIGHT.
+
+let _confirmOverlays = [];
+
+// Inject the pulse keyframes once.
+function _ensureConfirmPulseStyle() {
+  if (document.getElementById('__chromai_confirm_pulse')) return;
+  const style = document.createElement('style');
+  style.id = '__chromai_confirm_pulse';
+  style.textContent =
+    '@keyframes __chromai_confirm_pulse{0%{box-shadow:0 0 0 1px rgba(220,38,38,.9),0 0 0 4px rgba(220,38,38,.35)}' +
+    '50%{box-shadow:0 0 0 1px rgba(220,38,38,.9),0 0 0 9px rgba(220,38,38,0)}' +
+    '100%{box-shadow:0 0 0 1px rgba(220,38,38,.9),0 0 0 4px rgba(220,38,38,.35)}}';
+  document.documentElement.appendChild(style);
+}
+
+// selectors: array of CSS selectors (one per element the action will hit).
+// rootSelector: active focus region, so we highlight the SAME element the
+// region-aware action will resolve.
+function _showConfirmHighlight(selectors = [], rootSelector) {
+  _clearConfirmHighlight();
+  _ensureConfirmPulseStyle();
+
+  const els = selectors
+    .map((sel) => resolveActionTarget(sel, rootSelector).el)
+    .filter(Boolean);
+  if (!els.length) return { highlighted: 0 };
+
+  // Bring the first target into view so an off-screen element isn't approved blind.
+  els[0].scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+
+  els.forEach((el, i) => {
+    const label = document.createElement('div');
+    Object.assign(label.style, {
+      position: 'absolute', top: '0', left: '0',
+      background: '#dc2626', color: '#fff', fontSize: '10px',
+      fontFamily: 'monospace', padding: '1px 6px', borderRadius: '0 0 4px 0',
+      pointerEvents: 'none', whiteSpace: 'nowrap', maxWidth: '260px',
+      overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '16px',
+      fontWeight: '700'
+    });
+    label.textContent = selectors[i] || '';
+
+    const overlay = document.createElement('div');
+    Object.assign(overlay.style, {
+      position: 'fixed', pointerEvents: 'none', zIndex: '2147483646',
+      border: '2px solid #dc2626', borderRadius: '3px',
+      background: 'rgba(220,38,38,0.10)',
+      animation: '__chromai_confirm_pulse 1.2s ease-in-out infinite'
+    });
+    overlay.appendChild(label);
+    document.documentElement.appendChild(overlay);
+
+    const reposition = () => {
+      const r = el.getBoundingClientRect();
+      Object.assign(overlay.style, {
+        top: `${r.top}px`, left: `${r.left}px`,
+        width: `${r.width}px`, height: `${r.height}px`
+      });
+    };
+    reposition();
+
+    const scrollParents = [];
+    let ancestor = el.parentElement;
+    while (ancestor && ancestor !== document.documentElement) {
+      const { overflow, overflowY, overflowX } = getComputedStyle(ancestor);
+      if (/auto|scroll/.test(overflow + overflowY + overflowX)) {
+        scrollParents.push(ancestor);
+        ancestor.addEventListener('scroll', reposition, { passive: true });
+      }
+      ancestor = ancestor.parentElement;
+    }
+    window.addEventListener('scroll', reposition, { passive: true });
+    window.addEventListener('resize', reposition, { passive: true });
+    const ro = new ResizeObserver(reposition);
+    ro.observe(el);
+
+    overlay._teardown = () => {
+      ro.disconnect();
+      window.removeEventListener('scroll', reposition);
+      window.removeEventListener('resize', reposition);
+      scrollParents.forEach((p) => p.removeEventListener('scroll', reposition));
+    };
+    _confirmOverlays.push(overlay);
+  });
+
+  return { highlighted: els.length };
+}
+
+function _clearConfirmHighlight() {
+  _confirmOverlays.forEach((o) => { o._teardown?.(); o.remove(); });
+  _confirmOverlays = [];
+}
+
 // ── Message listener ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -1213,6 +1357,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (action === 'EXIT_PICK_MODE')        { _exitPickMode();  sendResponse({ success: true }); return false; }
   if (action === 'HIGHLIGHT_REGION')      { _showRegionHighlight(params.selector); sendResponse({ success: true }); return false; }
   if (action === 'CLEAR_REGION_HIGHLIGHT'){ _clearRegionHighlight(); sendResponse({ success: true }); return false; }
+  if (action === 'CONFIRM_HIGHLIGHT')     { sendResponse({ success: true, ..._showConfirmHighlight(params.selectors, params.rootSelector) }); return false; }
+  if (action === 'CLEAR_CONFIRM_HIGHLIGHT'){ _clearConfirmHighlight(); sendResponse({ success: true }); return false; }
 
   const handler = handlers[action];
 

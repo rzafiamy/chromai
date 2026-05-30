@@ -579,3 +579,26 @@ export const resetCognitiveStats = (maxSteps = 30, maxTokens = 16000) => {
     maxTokens
   });
 };
+
+export const setSendButtonState = (running) => {
+  const btn = document.getElementById('btn-send');
+  if (!btn) return;
+  
+  if (running) {
+    btn.classList.add('btn-stop-state');
+    btn.setAttribute('title', 'Stop agent');
+    btn.innerHTML = `
+      <svg class="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
+        <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+      </svg>
+    `;
+  } else {
+    btn.classList.remove('btn-stop-state');
+    btn.setAttribute('title', 'Send (Enter)');
+    btn.innerHTML = `
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    `;
+  }
+};

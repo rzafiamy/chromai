@@ -652,11 +652,28 @@ code.inline-code {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: opacity 0.15s, transform 0.1s;
+  transition: opacity 0.15s, transform 0.1s, background-color 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s;
 }
 #btn-send:hover { opacity: 0.88; }
 #btn-send:active { transform: scale(0.93); }
 #btn-send:disabled { background: var(--border); cursor: not-allowed; opacity: 1; }
+
+#btn-send.btn-stop-state {
+  background: rgba(239, 68, 68, 0.15) !important;
+  border: 1px solid rgba(239, 68, 68, 0.4) !important;
+  color: #f87171 !important;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.3) !important;
+  opacity: 1 !important;
+  cursor: pointer !important;
+}
+
+#btn-send.btn-stop-state:hover {
+  background: rgba(239, 68, 68, 0.25) !important;
+  border-color: rgba(239, 68, 68, 0.6) !important;
+  color: #ef4444 !important;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.5) !important;
+  transform: scale(1.05);
+}
 
 .input-hint {
   font-size: 10px;

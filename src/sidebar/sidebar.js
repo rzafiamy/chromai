@@ -1,6 +1,6 @@
 import { createBrowserSession, createAdapter } from './agent.js';
 import { getSettings } from './storage.js';
-import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats } from './ui.js';
+import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats, setSendButtonState } from './ui.js';
 import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
 
@@ -22,7 +22,15 @@ const initSession = async () => {
 };
 
 const handleSubmit = async (userText) => {
-  if (isRunning || !userText.trim()) return;
+  if (isRunning) {
+    if (session) {
+      session.aborted = true;
+    }
+    showToast('Stopping agent...');
+    return;
+  }
+
+  if (!userText || !userText.trim()) return;
 
   // "remove", "clear", "deselect", "reset" the region → clear it immediately
   if (getFocusRegion() && /\b(remove|clear|deselect|reset|cancel|delete)\b.*\b(region|selection|focus|frame|zone|area)\b|\b(region|selection|focus|frame|zone|area)\b.*\b(remove|clear|deselect|reset|cancel|delete)\b/i.test(userText)) {
@@ -36,8 +44,14 @@ const handleSubmit = async (userText) => {
     if (!session) return;
   }
 
+  // Clear aborted state for a new run
+  session.aborted = false;
+
   isRunning = true;
-  document.getElementById('btn-send').disabled = true;
+  setSendButtonState(true);
+  
+  const userInput = document.getElementById('user-input');
+  if (userInput) userInput.disabled = true;
 
   // Clear any prior unified verifier elements so they don't carry over
   const oldVerifier = document.getElementById('unified-goal-verifier');
@@ -101,11 +115,20 @@ const handleSubmit = async (userText) => {
     }
   } catch (err) {
     hideTyping();
-    renderMessage('error', `Error: ${err.message}`);
-    console.error('[ChromAI]', err);
+    if (err.message === 'Agent execution cancelled by user') {
+      renderMessage('system', '⏹️ Agent execution stopped.');
+    } else {
+      renderMessage('error', `Error: ${err.message}`);
+      console.error('[ChromAI]', err);
+    }
   } finally {
     isRunning = false;
-    document.getElementById('btn-send').disabled = false;
+    setSendButtonState(false);
+    const userInput = document.getElementById('user-input');
+    if (userInput) {
+      userInput.disabled = false;
+      userInput.focus();
+    }
   }
 };
 
@@ -196,6 +219,10 @@ const transcribeAudio = async (blob) => {
 
 document.getElementById('input-form').addEventListener('submit', (e) => {
   e.preventDefault();
+  if (isRunning) {
+    handleSubmit('');
+    return;
+  }
   const input = document.getElementById('user-input');
   const text = input.value.trim();
   if (!text) return;

@@ -73,11 +73,33 @@ export const createBrowserSession = ({ settings }) => {
     if (session && session.cognitiveStats) {
       session.cognitiveStats.turns = session.context?.turns?.filter(t => t.role === 'user').length ?? 0;
       session.cognitiveStats.steps = session.stepCounter?.count ?? 0;
+      
+      // Fallback: estimate tokens if API metadata didn't provide them
+      if (session.cognitiveStats.inputTokens === 0 && session.context) {
+        const userTurns = session.context.turns?.filter(t => t.role === 'user') ?? [];
+        const assistantTurns = session.context.turns?.filter(t => t.role === 'assistant') ?? [];
+        
+        const estInput = userTurns.reduce((sum, t) => sum + (t.tokenCount ?? 0), 0) + 
+                         (session.adapter?.estimateTokens?.(session.context.systemPrompt || '') ?? 0);
+        const estOutput = assistantTurns.reduce((sum, t) => sum + (t.tokenCount ?? 0), 0);
+        
+        session.cognitiveStats.inputTokens = estInput;
+        session.cognitiveStats.outputTokens = estOutput;
+      }
+      
       updateCognitiveStats(session.cognitiveStats);
     }
   };
 
   const tracer = (event) => {
+    // Eagerly check if the user triggered a stop/cancellation request!
+    if (session && session.aborted) {
+      throw new Error('Agent execution cancelled by user');
+    }
+
+    // Always refresh stats in real-time for every single event
+    refreshStats();
+
     // ── Tool calls ──
     if (event.type === 'tool_call') {
       if (session && session.cognitiveStats) {

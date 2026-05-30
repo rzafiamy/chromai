@@ -1,5 +1,62 @@
-import { SessionManager, OpenAICompatibleAdapter } from 'lemura';
+import { SessionManager, OpenAICompatibleAdapter, GoalInjector } from 'lemura';
 import { browserTools } from './tools.js';
+
+// Monkey-patch Lemura classes to use <chromai:> XML layout tags instead of <lemura:> tags
+if (GoalInjector && GoalInjector.prototype) {
+  GoalInjector.prototype.getFormattedBlock = function () {
+    const { statement, successCriteria, decomposition, completedSubGoals = [] } = this.goal;
+    const pending = decomposition.filter((sg) => !completedSubGoals.includes(sg));
+    const completed = decomposition.filter((sg) => completedSubGoals.includes(sg));
+    let block = `<chromai:goal>
+<chromai:statement>${statement}</chromai:statement>
+`;
+    if (successCriteria.length > 0) {
+      block += `<chromai:criteria>
+${successCriteria.map((c) => `- ${c}`).join("\n")}
+</chromai:criteria>
+`;
+    }
+    if (pending.length > 0) {
+      block += `<chromai:subgoals status="pending">
+${pending.map((sg) => `- ${sg}`).join("\n")}
+</chromai:subgoals>
+`;
+    }
+    if (completed.length > 0) {
+      block += `<chromai:subgoals status="done">
+${completed.map((sg) => `- \u2705 ${sg}`).join("\n")}
+</chromai:subgoals>
+`;
+    }
+    block += "</chromai:goal>";
+    return block;
+  };
+}
+
+if (SessionManager && SessionManager.prototype) {
+  const origBuildSystemPrompt = SessionManager.prototype.buildSystemPrompt;
+  SessionManager.prototype.buildSystemPrompt = function (...args) {
+    const res = origBuildSystemPrompt.apply(this, args);
+    return res ? res.replace(/<lemura:/g, '<chromai:').replace(/<\/lemura:/g, '</chromai:') : res;
+  };
+
+  const origBuildMessages = SessionManager.prototype.buildMessages;
+  SessionManager.prototype.buildMessages = function (...args) {
+    const messages = origBuildMessages.apply(this, args);
+    if (messages && Array.isArray(messages)) {
+      return messages.map(msg => {
+        if (typeof msg.content === 'string') {
+          return {
+            ...msg,
+            content: msg.content.replace(/<lemura:/g, '<chromai:').replace(/<\/lemura:/g, '</chromai:')
+          };
+        }
+        return msg;
+      });
+    }
+    return messages;
+  };
+}
 import {
   showConfirm,
   showToolActivity,
@@ -96,7 +153,10 @@ const makeAdapter = (settings) => {
     apiKey: settings.apiKey,
     defaultModel: settings.model || 'gpt-4o-mini',
     timeout: settings.requestTimeout || 120000,
-    retry: { maxRetries: 1, baseDelayMs: 1000 }
+    retry: { 
+      maxRetries: settings.maxRetries ?? 1, 
+      baseDelayMs: settings.baseDelayMs ?? 1000 
+    }
   });
 
   if (settings.visionModel) {
@@ -241,6 +301,7 @@ export const createBrowserSession = ({ settings }) => {
     maxIterations: settings.maxIterations,
     maxSteps: settings.maxSteps,
     maxCompletionTokens: settings.maxCompletionTokens,
+    temperature: settings.temperature ?? 0.0,
     tools: browserTools,
     media: { enableTools: true, toolPrefix: 'media_' },
     enableGoalPlanning: settings.enableGoalPlanning,
@@ -251,7 +312,7 @@ export const createBrowserSession = ({ settings }) => {
     staticSystemPrompt: settings.staticSystemPrompt,
     parallelToolCalls: settings.parallelToolCalls,
     toolFirewall: makeFirewall(() => abortHandle),
-    toolRegistryTimeoutMs: 30000,
+    toolRegistryTimeoutMs: settings.toolRegistryTimeoutMs ?? 30000,
     maxTokensPerTool: settings.maxTokensPerTool,
     systemPrompt: buildSystemPrompt(settings.systemPrompt),
     onTrace: tracer

@@ -18,7 +18,11 @@ const DEFAULTS = {
   parallelToolCalls: true,
   maxTokensPerTool: 4000,
   staticSystemPrompt: false,
-  enableGoalVerification: false
+  enableGoalVerification: false,
+  temperature: 0.0,
+  toolRegistryTimeoutMs: 30000,
+  maxRetries: 1,
+  baseDelayMs: 1000
 };
 
 export async function getSettings() {

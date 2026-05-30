@@ -25,6 +25,10 @@ getSettings().then(settings => {
   document.getElementById('goalInjectionPosition').value = settings.goalInjectionPosition ?? 'system_prompt';
   document.getElementById('enableGoalVerification').checked = settings.enableGoalVerification ?? false;
   document.getElementById('staticSystemPrompt').checked = settings.staticSystemPrompt ?? false;
+  document.getElementById('temperature').value = settings.temperature ?? 0.0;
+  document.getElementById('toolRegistryTimeoutMs').value = settings.toolRegistryTimeoutMs ?? 30000;
+  document.getElementById('maxRetries').value = settings.maxRetries ?? 1;
+  document.getElementById('baseDelayMs').value = settings.baseDelayMs ?? 1000;
 });
 
 // ── Microphone permission UI ──
@@ -80,7 +84,11 @@ form.addEventListener('submit', async (e) => {
     goalInjectionFrequency: document.getElementById('goalInjectionFrequency').value,
     goalInjectionPosition: document.getElementById('goalInjectionPosition').value,
     enableGoalVerification: document.getElementById('enableGoalVerification').checked,
-    staticSystemPrompt: document.getElementById('staticSystemPrompt').checked
+    staticSystemPrompt: document.getElementById('staticSystemPrompt').checked,
+    temperature: parseFloat(document.getElementById('temperature').value) ?? 0.0,
+    toolRegistryTimeoutMs: parseInt(document.getElementById('toolRegistryTimeoutMs').value, 10) || 30000,
+    maxRetries: parseInt(document.getElementById('maxRetries').value, 10) ?? 1,
+    baseDelayMs: parseInt(document.getElementById('baseDelayMs').value, 10) || 1000
   });
   statusMsg.classList.remove('hidden');
   setTimeout(() => statusMsg.classList.add('hidden'), 2500);

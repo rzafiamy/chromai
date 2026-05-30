@@ -694,20 +694,78 @@ code.inline-code {
 .confirm-overlay.hidden { display: none; }
 
 .confirm-card {
-  background: #1a1830;
-  border: 1px solid var(--warning);
-  border-radius: 10px;
-  padding: 12px 14px;
-  font-size: 12px;
+  background: #11111e;
+  border: 1px solid var(--border-light);
+  border-top: 3px solid var(--warning);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 12.5px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 .confirm-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+.confirm-icon-wrapper {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--warning), #d97706);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+  flex-shrink: 0;
+}
+.confirm-icon-wrapper--danger {
+  background: linear-gradient(135deg, #ef4444, #b91c1c) !important;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.3) !important;
+}
+.confirm-tool-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.confirm-title-area {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.confirm-subtitle {
+  font-size: 9px;
+  font-weight: 700;
   color: var(--warning);
-  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1;
+  margin-bottom: 3px;
+}
+.confirm-card--not-found .confirm-subtitle {
+  color: #f87171;
+}
+.confirm-title {
+  font-size: 13.5px;
   font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  line-height: 1.2;
+}
+.confirm-tool-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-weight: normal;
 }
 .confirm-body {
   color: var(--text);
@@ -753,12 +811,9 @@ code.inline-code {
 
 /* When the target element could NOT be located — escalate visual danger */
 .confirm-card--not-found {
-  border-color: rgba(220, 38, 38, 0.7);
+  border-color: rgba(239, 68, 68, 0.5);
+  border-top-color: #ef4444;
 }
-.confirm-card--not-found .confirm-header {
-  color: #fca5a5;
-}
-.confirm-card--not-found .confirm-header svg { stroke: #fca5a5; }
 .confirm-card--not-found .confirm-ok {
   background: linear-gradient(135deg, #b45309, #dc2626);
   position: relative;

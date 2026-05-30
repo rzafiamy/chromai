@@ -34,15 +34,35 @@
           <input type="text" id="model" placeholder="gpt-4o-mini" autocomplete="off">
           <span class="hint">Model name to use for agent inference</span>
         </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="maxRetries">API Retries</label>
+            <input type="number" id="maxRetries" min="0" max="10" placeholder="1">
+            <span class="hint">Failed API request retries (default: 1)</span>
+          </div>
+          <div class="field">
+            <label for="baseDelayMs">Retry Delay (ms)</label>
+            <input type="number" id="baseDelayMs" min="100" step="100" placeholder="1000">
+            <span class="hint">Delay between retries (default: 1000)</span>
+          </div>
+        </div>
       </section>
 
       <section>
         <h2>Agent Configuration</h2>
 
-        <div class="field">
-          <label for="maxIterations">Max Iterations</label>
-          <input type="number" id="maxIterations" min="1" max="100" placeholder="15">
-          <span class="hint">Maximum agent reasoning loops per session (default: 15)</span>
+        <div class="field-row">
+          <div class="field">
+            <label for="maxIterations">Max Iterations</label>
+            <input type="number" id="maxIterations" min="1" max="100" placeholder="15">
+            <span class="hint">Max reasoning loops (default: 15)</span>
+          </div>
+          <div class="field">
+            <label for="temperature">Model Temperature</label>
+            <input type="number" id="temperature" min="0.0" max="2.0" step="0.1" placeholder="0.0">
+            <span class="hint">Inference creativity (default: 0.0)</span>
+          </div>
         </div>
 
         <div class="field">
@@ -109,10 +129,17 @@
           <span class="hint">Maximum tokens the model can generate per reply (default: 4096)</span>
         </div>
 
-        <div class="field">
-          <label for="maxTokensPerTool">Max Tokens per Tool Result</label>
-          <input type="number" id="maxTokensPerTool" min="256" step="256" placeholder="4000">
-          <span class="hint">Tool output is truncated to this many tokens before being fed back to the model (default: 4000)</span>
+        <div class="field-row">
+          <div class="field">
+            <label for="maxTokensPerTool">Max Tokens per Tool Result</label>
+            <input type="number" id="maxTokensPerTool" min="256" step="256" placeholder="4000">
+            <span class="hint">Tool output token truncation limit (default: 4000)</span>
+          </div>
+          <div class="field">
+            <label for="toolRegistryTimeoutMs">Tool Execution Timeout (ms)</label>
+            <input type="number" id="toolRegistryTimeoutMs" min="1000" step="1000" placeholder="30000">
+            <span class="hint">Max execution time per tool (default: 30000)</span>
+          </div>
         </div>
 
         <div class="field-row">

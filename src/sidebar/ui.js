@@ -177,15 +177,65 @@ export const showTyping = () => {
 
 export const hideTyping = () => typingEl()?.remove();
 
+const TOOL_ICONS = {
+  getPageContent: '📄', getPageMeta: '🏷️', getSelectedText: '✂️',
+  extractLinks: '🔗', extractTable: '📊', getInteractiveElements: '🖱️',
+  getForms: '📋', clickElement: '👆', fillForm: '✏️', submitForm: '📤',
+  navigateTo: '🌐', scrollPage: '⬇️', scrollAndRead: '📖',
+  highlightElement: '🔦', waitForElement: '⏳', analyzePageVisually: '👁️',
+  findActionButton: '🎯', findCommentBox: '💬', dismissOverlay: '🚫',
+  classifyPage: '🧭', searchOnPage: '🔍', readThread: '🧵', writeToRegion: '✍️',
+  typeText: '⌨️', pressKey: '⏎', captureRegion: '📸', ocrRegion: '📝'
+};
+
+const TOOL_LABELS = {
+  getPageContent: 'Reading page content',
+  getPageMeta: 'Reading page metadata',
+  getSelectedText: 'Getting selected text',
+  extractLinks: 'Extracting links',
+  extractTable: 'Extracting table',
+  getInteractiveElements: 'Scanning interactive elements',
+  getForms: 'Scanning forms',
+  clickElement: 'Clicking element',
+  fillForm: 'Filling form',
+  submitForm: 'Submitting form',
+  navigateTo: 'Navigating to page',
+  scrollPage: 'Scrolling page',
+  scrollAndRead: 'Scrolling and reading',
+  highlightElement: 'Highlighting element',
+  waitForElement: 'Waiting for element',
+  analyzePageVisually: 'Analyzing page visually',
+  findActionButton: 'Finding button',
+  findCommentBox: 'Finding comment box',
+  dismissOverlay: 'Dismissing overlay',
+  classifyPage: 'Classifying page',
+  searchOnPage: 'Searching page',
+  readThread: 'Reading thread',
+  writeToRegion: 'Writing to region',
+  typeText: 'Typing text',
+  pressKey: 'Pressing key',
+  captureRegion: 'Capturing region',
+  ocrRegion: 'Extracting text from region'
+};
+
 export const showConfirm = ({ toolName, description, detail, notFound = false, abortHandle }) =>
   new Promise((resolve) => {
     const overlay = document.getElementById('confirm-overlay');
     const card = document.createElement('div');
     card.className = notFound ? 'confirm-card confirm-card--not-found' : 'confirm-card';
+    
+    const icon = TOOL_ICONS[toolName] || '⚙️';
+    const cleanToolName = toolName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+    
     card.innerHTML = `
       <div class="confirm-header">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        <strong>Action required: ${escapeHtml(toolName)}</strong>
+        <div class="confirm-icon-wrapper ${notFound ? 'confirm-icon-wrapper--danger' : ''}">
+          <span class="confirm-tool-icon">${icon}</span>
+        </div>
+        <div class="confirm-title-area">
+          <div class="confirm-subtitle">${notFound ? 'WARNING' : 'CONFIRM ACTION'}</div>
+          <div class="confirm-title">${escapeHtml(cleanToolName)} <span class="confirm-tool-badge">${escapeHtml(toolName)}</span></div>
+        </div>
       </div>
       <div class="confirm-body">${escapeHtml(description)}</div>
       ${detail ? `<code class="confirm-detail">${escapeHtml(detail)}</code>` : ''}
@@ -234,46 +284,6 @@ export const showConfirm = ({ toolName, description, detail, notFound = false, a
     overlay.classList.remove('hidden');
     okBtn.focus();
   });
-
-const TOOL_ICONS = {
-  getPageContent: '📄', getPageMeta: '🏷️', getSelectedText: '✂️',
-  extractLinks: '🔗', extractTable: '📊', getInteractiveElements: '🖱️',
-  getForms: '📋', clickElement: '👆', fillForm: '✏️', submitForm: '📤',
-  navigateTo: '🌐', scrollPage: '⬇️', scrollAndRead: '📖',
-  highlightElement: '🔦', waitForElement: '⏳', analyzePageVisually: '👁️',
-  findActionButton: '🎯', findCommentBox: '💬', dismissOverlay: '🚫',
-  classifyPage: '🧭', searchOnPage: '🔍', readThread: '🧵', writeToRegion: '✍️',
-  typeText: '⌨️', pressKey: '⏎', captureRegion: '📸'
-};
-
-const TOOL_LABELS = {
-  getPageContent: 'Reading page content',
-  getPageMeta: 'Reading page metadata',
-  getSelectedText: 'Getting selected text',
-  extractLinks: 'Extracting links',
-  extractTable: 'Extracting table',
-  getInteractiveElements: 'Scanning interactive elements',
-  getForms: 'Scanning forms',
-  clickElement: 'Clicking element',
-  fillForm: 'Filling form',
-  submitForm: 'Submitting form',
-  navigateTo: 'Navigating to page',
-  scrollPage: 'Scrolling page',
-  scrollAndRead: 'Scrolling and reading',
-  highlightElement: 'Highlighting element',
-  waitForElement: 'Waiting for element',
-  analyzePageVisually: 'Analyzing page visually',
-  findActionButton: 'Finding button',
-  findCommentBox: 'Finding comment box',
-  dismissOverlay: 'Dismissing overlay',
-  classifyPage: 'Classifying page',
-  searchOnPage: 'Searching page',
-  readThread: 'Reading thread',
-  writeToRegion: 'Writing to region',
-  typeText: 'Typing text',
-  pressKey: 'Pressing key',
-  captureRegion: 'Capturing region'
-};
 
 export const showToolActivity = (toolName, argsJson) => {
   const container = messagesEl();

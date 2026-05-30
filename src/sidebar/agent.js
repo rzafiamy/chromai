@@ -16,8 +16,10 @@ import {
 } from './ui.js';
 import { buildSystemPrompt } from './prompt.js';
 import { describeToolCall, highlightOnPage } from './skills.js';
+import { AbortHandle, AbortError } from './abort.js';
+import { setAbortHandle } from './tools.js';
 
-const makeFirewall = () => ({
+const makeFirewall = (getHandle) => ({
   defaultDecision: 'allow',
   rules: [
     { name: 'fillForm',     decision: 'ask', reason: 'Will fill form fields on the page' },
@@ -28,15 +30,51 @@ const makeFirewall = () => ({
     { name: 'navigateTo',   decision: 'ask', reason: 'Will navigate to a new URL on the same site' },
   ],
   onAsk: async (toolName, argsJson) => {
+    const abortHandle = getHandle();
+    // If the user already pressed Stop, never raise a modal — deny straight away.
+    if (abortHandle.aborted) return false;
     try {
       const { selector, fields } = JSON.parse(argsJson);
       const target = selector ?? fields?.[0]?.selector;
       if (target) await highlightOnPage(target);
     } catch { /* ignore */ }
     const { description, detail } = describeToolCall(toolName, argsJson);
-    return showConfirm({ toolName, description, detail });
+    // showConfirm resolves false the instant Stop is pressed (abort-aware modal).
+    return showConfirm({ toolName, description, detail, abortHandle: getHandle() });
   }
 });
+
+// lemura's adapter takes no AbortSignal. Wrap complete()/stream() so that a press
+// of Stop (a) aborts the in-flight fetch via the signal, and (b) immediately
+// rejects the awaited promise instead of waiting for the network round-trip.
+const wrapAdapterForAbort = (adapter, getHandle) => {
+  const origComplete = adapter.complete?.bind(adapter);
+  const origStream = adapter.stream?.bind(adapter);
+
+  if (origComplete) {
+    adapter.complete = (request) => {
+      const handle = getHandle();
+      handle?.throwIfAborted();
+      const withSignal = handle ? { ...request, signal: handle.signal } : request;
+      const call = origComplete(withSignal);
+      return handle ? handle.race(call) : call;
+    };
+  }
+
+  if (origStream) {
+    adapter.stream = async function* (request) {
+      const handle = getHandle();
+      handle?.throwIfAborted();
+      const withSignal = handle ? { ...request, signal: handle.signal } : request;
+      for await (const chunk of origStream(withSignal)) {
+        handle?.throwIfAborted();
+        yield chunk;
+      }
+    };
+  }
+
+  return adapter;
+};
 
 const makeAdapter = (settings) => {
   const adapter = new OpenAICompatibleAdapter({
@@ -69,6 +107,9 @@ export const createBrowserSession = ({ settings }) => {
   let iterationDiv = null;
   let lastThinkingDiv = null;
 
+  // One cancellation handle per run. Recreated by resetAbort() before each run.
+  let abortHandle = new AbortHandle();
+
   const refreshStats = () => {
     if (session && session.cognitiveStats) {
       session.cognitiveStats.turns = session.context?.turns?.filter(t => t.role === 'user').length ?? 0;
@@ -93,8 +134,8 @@ export const createBrowserSession = ({ settings }) => {
 
   const tracer = (event) => {
     // Eagerly check if the user triggered a stop/cancellation request!
-    if (session && session.aborted) {
-      throw new Error('Agent execution cancelled by user');
+    if (abortHandle.aborted) {
+      throw new AbortError();
     }
 
     // Always refresh stats in real-time for every single event
@@ -177,8 +218,10 @@ export const createBrowserSession = ({ settings }) => {
     }
   };
 
+  const adapter = wrapAdapterForAbort(makeAdapter(settings), () => abortHandle);
+
   session = new SessionManager({
-    adapter: makeAdapter(settings),
+    adapter,
     model: settings.model || 'gpt-4o-mini',
     maxTokens: settings.contextWindow || 128000,
     maxIterations: settings.maxIterations,
@@ -193,7 +236,7 @@ export const createBrowserSession = ({ settings }) => {
     enableGoalVerification: settings.enableGoalVerification,
     staticSystemPrompt: settings.staticSystemPrompt,
     parallelToolCalls: settings.parallelToolCalls,
-    toolFirewall: makeFirewall(),
+    toolFirewall: makeFirewall(() => abortHandle),
     toolRegistryTimeoutMs: 30000,
     maxTokensPerTool: settings.maxTokensPerTool,
     systemPrompt: buildSystemPrompt(settings.systemPrompt),
@@ -209,6 +252,23 @@ export const createBrowserSession = ({ settings }) => {
     outputTokens: 0,
     maxTokens: settings.contextWindow || 16000
   };
+
+  // Cancellation surface. `session.aborted = true` (kept for back-compat) trips the
+  // current handle; abort()/resetAbort() are the preferred entry points.
+  Object.defineProperty(session, 'aborted', {
+    get: () => abortHandle.aborted,
+    set: (v) => { if (v) abortHandle.abort(); }
+  });
+  session.abort = () => abortHandle.abort();
+  session.resetAbort = () => {
+    abortHandle = new AbortHandle();
+    setAbortHandle(abortHandle);
+    return abortHandle;
+  };
+  session.getAbortHandle = () => abortHandle;
+
+  // tools.js reads the active handle to bail out between content-script calls.
+  setAbortHandle(abortHandle);
 
   refreshStats();
 

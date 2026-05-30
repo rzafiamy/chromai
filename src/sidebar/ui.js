@@ -177,7 +177,7 @@ export const showTyping = () => {
 
 export const hideTyping = () => typingEl()?.remove();
 
-export const showConfirm = ({ toolName, description, detail }) =>
+export const showConfirm = ({ toolName, description, detail, abortHandle }) =>
   new Promise((resolve) => {
     const container = messagesEl();
     const card = document.createElement('div');
@@ -194,8 +194,27 @@ export const showConfirm = ({ toolName, description, detail }) =>
         <button class="confirm-btn confirm-ok">Confirm</button>
       </div>
     `;
-    card.querySelector('.confirm-ok').addEventListener('click', () => { card.remove(); resolve(true); });
-    card.querySelector('.confirm-cancel').addEventListener('click', () => { card.remove(); resolve(false); });
+
+    let settled = false;
+    let unsubscribe = () => {};
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+      card.remove();
+      resolve(value);
+    };
+
+    card.querySelector('.confirm-ok').addEventListener('click', () => finish(true));
+    card.querySelector('.confirm-cancel').addEventListener('click', () => finish(false));
+
+    // Pressing Stop while this modal is open must dismiss it and deny the action,
+    // otherwise the agent stays parked forever inside the firewall's onAsk().
+    if (abortHandle) {
+      if (abortHandle.aborted) { finish(false); return; }
+      unsubscribe = abortHandle.onAbort(() => finish(false));
+    }
+
     container.appendChild(card);
     container.scrollTop = container.scrollHeight;
   });
@@ -205,7 +224,10 @@ const TOOL_ICONS = {
   extractLinks: '🔗', extractTable: '📊', getInteractiveElements: '🖱️',
   getForms: '📋', clickElement: '👆', fillForm: '✏️', submitForm: '📤',
   navigateTo: '🌐', scrollPage: '⬇️', scrollAndRead: '📖',
-  highlightElement: '🔦', waitForElement: '⏳', analyzePageVisually: '👁️'
+  highlightElement: '🔦', waitForElement: '⏳', analyzePageVisually: '👁️',
+  findActionButton: '🎯', findCommentBox: '💬', dismissOverlay: '🚫',
+  classifyPage: '🧭', searchOnPage: '🔍', readThread: '🧵', writeToRegion: '✍️',
+  typeText: '⌨️', pressKey: '⏎', captureRegion: '📸'
 };
 
 const TOOL_LABELS = {
@@ -224,7 +246,17 @@ const TOOL_LABELS = {
   scrollAndRead: 'Scrolling and reading',
   highlightElement: 'Highlighting element',
   waitForElement: 'Waiting for element',
-  analyzePageVisually: 'Analyzing page visually'
+  analyzePageVisually: 'Analyzing page visually',
+  findActionButton: 'Finding button',
+  findCommentBox: 'Finding comment box',
+  dismissOverlay: 'Dismissing overlay',
+  classifyPage: 'Classifying page',
+  searchOnPage: 'Searching page',
+  readThread: 'Reading thread',
+  writeToRegion: 'Writing to region',
+  typeText: 'Typing text',
+  pressKey: 'Pressing key',
+  captureRegion: 'Capturing region'
 };
 
 export const showToolActivity = (toolName, argsJson) => {
@@ -234,8 +266,9 @@ export const showToolActivity = (toolName, argsJson) => {
 
   let detail = '';
   try {
-    const { url, selector, fields, direction } = JSON.parse(argsJson || '{}');
+    const { url, selector, fields, direction, query } = JSON.parse(argsJson || '{}');
     if (url) detail = url;
+    else if (query) detail = query;
     else if (selector) detail = selector;
     else if (fields) detail = fields.map(({ selector: s }) => s).join(', ');
     else if (direction) detail = direction;

@@ -3,6 +3,7 @@ import { getSettings } from './storage.js';
 import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats, setSendButtonState } from './ui.js';
 import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
+import { isAbortError } from './abort.js';
 
 let session = null;
 let isRunning = false;
@@ -24,6 +25,9 @@ const initSession = async () => {
 const handleSubmit = async (userText) => {
   if (isRunning) {
     if (session) {
+      // Trips the shared abort handle: aborts the in-flight LLM fetch, drops any
+      // queued tool calls, and dismisses an open confirmation modal immediately.
+      session.abort?.();
       session.aborted = true;
     }
     showToast('Stopping agent...');
@@ -44,8 +48,9 @@ const handleSubmit = async (userText) => {
     if (!session) return;
   }
 
-  // Clear aborted state for a new run
-  session.aborted = false;
+  // Fresh abort handle for this run (clears any prior cancelled state).
+  if (session.resetAbort) session.resetAbort();
+  else session.aborted = false;
 
   isRunning = true;
   setSendButtonState(true);
@@ -90,6 +95,7 @@ const handleSubmit = async (userText) => {
       const warningRegex = /---\s*(?:⚠️|⚡|🚨|\u26A0\uFE0F)?\s*\*\*Goal Verification Warning\*\*[\s\S]*$/i;
 
       for await (const chunk of responseStream) {
+        if (session.aborted) throw new Error('Agent execution cancelled by user');
         if (!assistantMsgEl) {
           hideTyping(); // Clear typing indicator as soon as the first stream chunk arrives!
           assistantMsgEl = renderMessage('assistant', '');
@@ -115,7 +121,7 @@ const handleSubmit = async (userText) => {
     }
   } catch (err) {
     hideTyping();
-    if (err.message === 'Agent execution cancelled by user') {
+    if (isAbortError(err)) {
       renderMessage('system', '⏹️ Agent execution stopped.');
     } else {
       renderMessage('error', `Error: ${err.message}`);

@@ -45,6 +45,7 @@ Before acting on any page, orient yourself:
 ## Tool usage rules
 - classifyPage → call at the start of any multi-step task when you are unsure what kind of page you are on.
 - dismissOverlay → call first if a banner or modal is blocking the page before reading or interacting.
+- findActionButton → on complex SPAs (LinkedIn, Facebook, X/Twitter, Instagram), buttons have hashed class names and no stable id. Call findActionButton with the button's visible text ("Start a post", "Post", "Send", "Like", "Comment", "Follow", "Connect", "Next") to get a reliable selector, THEN clickElement on the returned selector. Do not invent CSS selectors from class names — they change on every render.
 - findCommentBox → call before posting any comment or reply to locate the correct input selector.
 - searchOnPage → use when looking for a specific word, name, or section instead of reading the whole page.
 - readThread → use when the user asks about comments, replies, or discussion content; it handles load-more automatically.
@@ -57,6 +58,18 @@ Before acting on any page, orient yourself:
 - scrollAndRead → use after navigating to a feed to load posts, AND whenever the user asks to read/analyze/summarize content that requires scrolling (comments, replies, threads, search results). Keep calling scrollAndRead in a loop until either: (a) you have collected enough content to fully answer the request, or (b) two consecutive scrolls return no new text. Do NOT stop after a single scroll and say "there are more comments" — keep going until you can give a complete answer.
 - Prefer IDs and data-attributes in CSS selectors over positional or class-based selectors.
 - After each action, verify the result before continuing.
+
+## Interacting with complex SPAs (LinkedIn, Facebook, X/Twitter, Instagram)
+These sites use React/Ember with hashed, render-unstable class names. NEVER hand-craft a CSS selector from a class you saw — it will break. Instead:
+- To click any control, call **findActionButton** with the visible label and click the returned selector. Prefer the labels these sites actually use:
+  - LinkedIn create post → findActionButton("Start a post"), then in the dialog write your text, then findActionButton("Post").
+  - LinkedIn react/comment → findActionButton("Like" / "Comment"); comment box → findCommentBox.
+  - Facebook create post → findActionButton("Create post") or findActionButton("What's on your mind"), write, then findActionButton("Post").
+  - X/Twitter compose → findActionButton("Post") / findActionButton("Tweet"); reply box → findCommentBox.
+- The post/compose box is almost always a contenteditable, not a textarea. Use writeToRegion (if a focus region is set) or typeText into the contenteditable selector. fillForm often fails on these editors.
+- After opening a composer, the Post/Send button is frequently disabled until text is entered. Write the text FIRST, then call findActionButton again to get the now-enabled button before clicking.
+- If findActionButton and the page context both fail to surface a control, fall back to analyzePageVisually to locate it on screen, then findActionButton with the exact label you saw.
+- Prefer selectors anchored on aria-label or data-* attributes (these are stable); the page context already gives you these.
 
 ## Social media search patterns
 - Twitter/X search: https://twitter.com/search?q=QUERY&f=live

@@ -30,6 +30,122 @@ function querySelectorAllDeep(selector, root = document) {
   return results;
 }
 
+// ── Shared element helpers ────────────────────────────────────────────────────
+// Centralized so every tool (interactive elements, forms, page context, action
+// button finder) produces the SAME stable selectors and accessible names. This
+// is what makes the agent reliable on SPAs like LinkedIn and Facebook, where
+// class names are hashed and structure changes on every render.
+
+// Accessible name resolution, roughly following the ARIA accname algorithm:
+// aria-label → aria-labelledby → associated <label> → placeholder/title/value
+// → trimmed text content. This is the label the agent should reason about.
+function accessibleName(el) {
+  if (!el) return '';
+  const aria = el.getAttribute?.('aria-label');
+  if (aria?.trim()) return aria.trim().slice(0, 100);
+
+  const labelledby = el.getAttribute?.('aria-labelledby');
+  if (labelledby) {
+    const text = labelledby.split(/\s+/)
+      .map(id => document.getElementById(id)?.innerText?.trim())
+      .filter(Boolean).join(' ');
+    if (text) return text.slice(0, 100);
+  }
+  if (el.id) {
+    const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (lbl?.innerText?.trim()) return lbl.innerText.trim().slice(0, 100);
+  }
+  const wrapLabel = el.closest?.('label');
+  if (wrapLabel?.innerText?.trim()) return wrapLabel.innerText.trim().slice(0, 100);
+
+  const titled = el.getAttribute?.('title') || el.placeholder || el.getAttribute?.('data-placeholder');
+  if (titled?.trim?.()) return titled.trim().slice(0, 100);
+
+  // Image-only buttons: fall back to alt text of a child image/svg title
+  const img = el.querySelector?.('img[alt]');
+  if (img?.alt?.trim()) return img.alt.trim().slice(0, 100);
+
+  const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+  return txt.slice(0, 100);
+}
+
+// Is this element actually visible and on-screen?
+function isVisible(el) {
+  if (!el || !el.getBoundingClientRect) return false;
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return false;
+  const s = getComputedStyle(el);
+  return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+}
+
+// Class tokens that are framework-generated and unstable — never anchor on these.
+const UNSTABLE_CLASS = /^(js-|is-|has-|ng-|v-|svelte-|css-|sc-|jsx-|emotion-|MuiBox|chakra-)|[a-z0-9]{6,}$/i;
+
+function stableClasses(el) {
+  return Array.from(el.classList || [])
+    .filter(c => c.length < 30 && !UNSTABLE_CLASS.test(c))
+    .slice(0, 2);
+}
+
+// Build the most stable CSS selector we can for an element, preferring handles
+// that survive re-renders: id → data-testid/data-* → name → aria-label → role+
+// stable-class, validated for uniqueness, falling back to an nth-of-type path.
+function buildSelector(el) {
+  if (!el || el.nodeType !== 1) return null;
+  const unique = (sel) => { try { return document.querySelectorAll(sel).length === 1; } catch { return false; } };
+
+  if (el.id && !/^[0-9]/.test(el.id)) {
+    const sel = `#${CSS.escape(el.id)}`;
+    if (unique(sel)) return sel;
+  }
+  for (const attr of ['data-testid', 'data-test-id', 'data-test', 'data-cy', 'data-control-name', 'data-tracking-control-name']) {
+    const v = el.getAttribute?.(attr);
+    if (v) {
+      const sel = `[${attr}="${CSS.escape(v)}"]`;
+      if (unique(sel)) return sel;
+    }
+  }
+  const name = el.getAttribute?.('name');
+  if (name) {
+    const sel = `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+    if (unique(sel)) return sel;
+  }
+  const aria = el.getAttribute?.('aria-label');
+  if (aria) {
+    const sel = `${el.tagName.toLowerCase()}[aria-label="${CSS.escape(aria)}"]`;
+    if (unique(sel)) return sel;
+    // aria-label scoped by role is often unique even when label alone isn't
+    const role = el.getAttribute('role');
+    if (role) {
+      const roleSel = `[role="${role}"][aria-label="${CSS.escape(aria)}"]`;
+      if (unique(roleSel)) return roleSel;
+    }
+  }
+
+  // Walk up building a path, anchoring on stable handles, stopping once unique.
+  const segment = (node) => {
+    const tag = node.tagName.toLowerCase();
+    const testid = node.getAttribute?.('data-testid') || node.getAttribute?.('data-control-name');
+    if (testid) return `[data-testid="${CSS.escape(testid)}"]`;
+    const cls = stableClasses(node).map(c => `.${CSS.escape(c)}`).join('');
+    const siblings = node.parentElement
+      ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName)
+      : [];
+    const nth = siblings.length > 1 ? `:nth-of-type(${siblings.indexOf(node) + 1})` : '';
+    return `${tag}${cls}${nth}`;
+  };
+
+  const parts = [];
+  let node = el;
+  for (let i = 0; i < 6 && node && node !== document.body && node.nodeType === 1; i++) {
+    parts.unshift(segment(node));
+    const sel = parts.join(' > ');
+    if (unique(sel)) return sel;
+    node = node.parentElement;
+  }
+  return parts.join(' > ');
+}
+
 const handlers = {
   GET_PAGE_CONTENT({ maxLength = MAX_TEXT_LENGTH, rootSelector } = {}) {
     const root = rootSelector ? document.querySelector(rootSelector) : document.body;
@@ -239,72 +355,37 @@ const handlers = {
   },
 
   GET_INTERACTIVE_ELEMENTS({ includeHidden = false } = {}) {
-    const INTERACTIVE = 'a[href], button, input, select, textarea, [contenteditable], [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [role="textbox"], [role="combobox"], [tabindex]';
-
-    function resolveLabel(el) {
-      // 1. explicit <label for="id">
-      if (el.id) {
-        const lbl = document.querySelector(`label[for="${el.id}"]`);
-        if (lbl) return lbl.innerText.trim().slice(0, 80);
-      }
-      // 2. wrapping <label>
-      const wrapLabel = el.closest('label');
-      if (wrapLabel) return wrapLabel.innerText.trim().slice(0, 80);
-      // 3. aria attributes
-      if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').slice(0, 80);
-      if (el.getAttribute('aria-labelledby')) {
-        const ref = document.getElementById(el.getAttribute('aria-labelledby'));
-        if (ref) return ref.innerText.trim().slice(0, 80);
-      }
-      // 4. placeholder / title / name
-      return (el.placeholder || el.title || el.name || el.innerText?.trim() || '').slice(0, 80);
-    }
-
-    function uniqueSelector(el) {
-      if (el.id) return `#${CSS.escape(el.id)}`;
-      if (el.getAttribute('name')) return `${el.tagName.toLowerCase()}[name="${el.getAttribute('name')}"]`;
-      if (el.getAttribute('data-testid')) return `[data-testid="${el.getAttribute('data-testid')}"]`;
-      // Walk up and build nth-of-type path (max 4 levels)
-      const parts = [];
-      let node = el;
-      for (let i = 0; i < 4 && node && node !== document.body; i++) {
-        const tag = node.tagName.toLowerCase();
-        const siblings = node.parentElement ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName) : [];
-        const idx = siblings.indexOf(node) + 1;
-        parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
-        node = node.parentElement;
-      }
-      return parts.join(' > ');
-    }
+    const INTERACTIVE = 'a[href], button, input, select, textarea, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [role="textbox"], [role="combobox"], [role="switch"], [role="option"], [onclick], [tabindex]:not([tabindex="-1"])';
 
     function rect(el) {
       const r = el.getBoundingClientRect();
       return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
     }
 
-    const elements = Array.from(document.querySelectorAll(INTERACTIVE))
+    // Traverse shadow DOM — LinkedIn/Facebook render interactive UI inside roots.
+    const raw = querySelectorAllDeep(INTERACTIVE);
+    const seen = new Set();
+    const elements = raw
       .filter(el => {
-        if (!includeHidden) {
-          const r = el.getBoundingClientRect();
-          if (r.width === 0 || r.height === 0) return false;
-          const style = getComputedStyle(el);
-          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-        }
-        return true;
+        if (seen.has(el)) return false;
+        seen.add(el);
+        return includeHidden || isVisible(el);
       })
-      .slice(0, 120)
+      .slice(0, 140)
       .map(el => ({
         tag: el.tagName.toLowerCase(),
-        type: el.type || el.getAttribute('role') || null,
-        selector: uniqueSelector(el),
-        label: resolveLabel(el),
+        type: el.isContentEditable ? 'contenteditable' : (el.type || null),
+        role: el.getAttribute('role') || null,
+        selector: buildSelector(el),
+        label: accessibleName(el),
         value: el.value !== undefined ? String(el.value).slice(0, 200) : null,
         checked: el.checked !== undefined ? el.checked : null,
-        disabled: el.disabled || null,
-        placeholder: el.placeholder || null,
+        disabled: el.disabled || el.getAttribute('aria-disabled') === 'true' || null,
+        placeholder: el.placeholder || el.getAttribute('data-placeholder') || null,
         href: el.href || null,
         position: rect(el)
-      }));
+      }))
+      .filter(e => e.selector);
 
     return { count: elements.length, elements };
   },
@@ -391,51 +472,21 @@ const handlers = {
     }
 
     // Key interactive elements with selectors — same logic as GET_INTERACTIVE_ELEMENTS but compact
-    const INTERACTIVE = 'button, input:not([type=hidden]), select, textarea, [contenteditable], a[href], [role="button"], [role="tab"], [role="menuitem"], [role="textbox"], [role="combobox"]';
+    const INTERACTIVE = 'button, input:not([type=hidden]), select, textarea, [contenteditable]:not([contenteditable="false"]), a[href], [role="button"], [role="tab"], [role="menuitem"], [role="textbox"], [role="combobox"], [role="switch"], [onclick]';
 
-    function resolveLabel(el) {
-      if (el.id) {
-        const lbl = document.querySelector(`label[for="${el.id}"]`);
-        if (lbl) return lbl.innerText.trim().slice(0, 60);
-      }
-      const wrapLabel = el.closest('label');
-      if (wrapLabel) return wrapLabel.innerText.trim().slice(0, 60);
-      return (el.getAttribute('aria-label') || el.placeholder || el.title || el.name || el.innerText?.trim() || '').slice(0, 60);
-    }
-
-    function uniqueSelector(el) {
-      if (el.id) return `#${CSS.escape(el.id)}`;
-      if (el.getAttribute('name')) return `${el.tagName.toLowerCase()}[name="${el.getAttribute('name')}"]`;
-      if (el.getAttribute('data-testid')) return `[data-testid="${el.getAttribute('data-testid')}"]`;
-      const parts = [];
-      let node = el;
-      for (let i = 0; i < 4 && node && node !== document.body; i++) {
-        const tag = node.tagName.toLowerCase();
-        const siblings = node.parentElement ? Array.from(node.parentElement.children).filter(c => c.tagName === node.tagName) : [];
-        const idx = siblings.indexOf(node) + 1;
-        parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
-        node = node.parentElement;
-      }
-      return parts.join(' > ');
-    }
-
-    const elements = Array.from((root || document).querySelectorAll(INTERACTIVE))
-      .filter(el => {
-        const r = el.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0) return false;
-        const s = getComputedStyle(el);
-        return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
-      })
+    const elements = querySelectorAllDeep(INTERACTIVE, root || document)
+      .filter(isVisible)
       .slice(0, maxElements)
       .map(el => ({
         tag: el.tagName.toLowerCase(),
         type: el.isContentEditable ? 'contenteditable' : (el.type || el.getAttribute('role') || null),
-        selector: uniqueSelector(el),
-        label: resolveLabel(el),
+        selector: buildSelector(el),
+        label: accessibleName(el).slice(0, 60),
         value: el.isContentEditable
           ? (el.innerText?.trim().slice(0, 80) || null)
           : (el.value !== undefined && el.value ? String(el.value).slice(0, 80) : null)
-      }));
+      }))
+      .filter(e => e.selector);
 
     const rawText = textRoot?.innerText || '';
     return {
@@ -816,6 +867,64 @@ const handlers = {
       count: unique.length,
       rect: { top: Math.round(rect.top), left: Math.round(rect.left), width: Math.round(rect.width), height: Math.round(rect.height) }
     };
+  },
+
+  // Find a clickable control (button, link, role=button, menu item) by its visible
+  // text or accessible name. Built for SPAs like LinkedIn/Facebook where the
+  // "Start a post", "Write a comment", "Like", "Send" controls are <div role=button>
+  // with hashed classes and no stable id. Returns ranked candidates with stable
+  // selectors so the agent can click without guessing.
+  FIND_ACTION_BUTTON({ query, limit = 5 } = {}) {
+    if (!query) return { found: false, matches: [], error: 'No query provided' };
+    const q = query.toLowerCase().trim();
+    const words = q.split(/\s+/).filter(Boolean);
+
+    const CLICKABLE = 'button, a[href], [role="button"], [role="link"], [role="menuitem"], [role="tab"], input[type="submit"], input[type="button"], [onclick], [tabindex]:not([tabindex="-1"])';
+    const seen = new Set();
+    const candidates = querySelectorAllDeep(CLICKABLE).filter(el => {
+      if (seen.has(el)) return false;
+      seen.add(el);
+      return isVisible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+    });
+
+    const scoreFor = (name) => {
+      const n = name.toLowerCase().trim();
+      if (!n) return 0;
+      if (n === q) return 100;                          // exact
+      if (n.startsWith(q)) return 85;                   // prefix
+      if (n.includes(q)) return 70;                     // substring
+      const hits = words.filter(w => n.includes(w)).length; // all/some words present
+      if (hits === words.length) return 55;
+      if (hits > 0) return 30 + hits * 5;
+      return 0;
+    };
+
+    const ranked = candidates.map(el => {
+      const name = accessibleName(el);
+      // Also consider title/value attributes that aren't the accessible name
+      const altNames = [name, el.getAttribute('title') || '', el.value || ''];
+      const score = Math.max(...altNames.map(scoreFor));
+      const r = el.getBoundingClientRect();
+      // Mild preference for larger, on-screen, top-of-page controls
+      const onScreen = r.top >= 0 && r.top < window.innerHeight;
+      return { el, name, score: score + (onScreen ? 3 : 0), rect: r };
+    })
+      .filter(c => c.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    if (ranked.length === 0) return { found: false, matches: [], query };
+
+    const matches = ranked.map(({ el, name, score, rect }) => ({
+      selector: buildSelector(el),
+      label: name,
+      tag: el.tagName.toLowerCase(),
+      role: el.getAttribute('role') || null,
+      score,
+      rect: { top: Math.round(rect.top), left: Math.round(rect.left), width: Math.round(rect.width), height: Math.round(rect.height) }
+    })).filter(m => m.selector);
+
+    return { found: matches.length > 0, query, count: matches.length, matches, best: matches[0] || null };
   },
 
   SEARCH_ON_PAGE({ query, limit = 10 } = {}) {

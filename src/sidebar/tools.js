@@ -1,11 +1,20 @@
 // Browser tool definitions for the lemura agent.
 // Each tool sends a message to the content script running in the active tab.
 
+import { AbortError } from './abort.js';
+
 // Global focus region — set by the element picker in the sidebar.
 // When non-null, content-reading tools scope their results to this CSS selector.
 let _focusRegion = null;
 export const setFocusRegion = (selector) => { _focusRegion = selector; };
 export const getFocusRegion = () => _focusRegion;
+
+// Active abort handle for the running agent. Set by agent.js per run so that tool
+// calls stop firing the moment the user presses Stop, rather than draining the
+// whole queued tool chain.
+let _abortHandle = null;
+export const setAbortHandle = (handle) => { _abortHandle = handle; };
+const throwIfAborted = () => { if (_abortHandle?.aborted) throw new AbortError(); };
 
 const getActiveTab = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -28,18 +37,23 @@ const sendMessage = (tabId, payload) =>
   });
 
 const sendToContentScript = async (action, params = {}) => {
+  throwIfAborted();
   const tab = await getActiveTab();
   const payload = { action, ...params };
-  try {
-    return await sendMessage(tab.id, payload);
-  } catch (err) {
-    if (!isNoReceiverError(err.message)) throw err;
-    // Content script not yet injected in this tab (stale tab or restricted page).
-    // Inject on demand and retry once.
-    await injectContentScript(tab.id);
-    await new Promise((r) => setTimeout(r, 200));
-    return sendMessage(tab.id, payload);
-  }
+  const run = async () => {
+    try {
+      return await sendMessage(tab.id, payload);
+    } catch (err) {
+      if (!isNoReceiverError(err.message)) throw err;
+      // Content script not yet injected in this tab (stale tab or restricted page).
+      // Inject on demand and retry once.
+      await injectContentScript(tab.id);
+      await new Promise((r) => setTimeout(r, 200));
+      return sendMessage(tab.id, payload);
+    }
+  };
+  // Race against Stop so a slow DOM action doesn't keep the agent hanging.
+  return _abortHandle ? _abortHandle.race(run()) : run();
 };
 
 const captureTabScreenshot = async () => {
@@ -72,6 +86,7 @@ export const captureViewportBase64 = async () => {
 };
 
 const navigateTab = async (url) => {
+  throwIfAborted();
   const tab = await getActiveTab();
 
   // Block navigation to a different origin than the current tab.
@@ -463,6 +478,20 @@ export const browserTools = [
     description: 'Automatically detect and dismiss cookie banners, GDPR consent popups, newsletter modals, and other overlays that block page content. Call this when the page is obscured by a popup before trying to read or interact with content.',
     parameters: { type: 'object', properties: {} },
     execute: () => sendToContentScript('DISMISS_OVERLAY')
+  },
+
+  {
+    name: 'findActionButton',
+    description: 'Find a clickable control (button, link, menu item, or role="button") by its visible text or accessible label. Use this on complex SPAs like LinkedIn, Facebook, Twitter where buttons have hashed class names and no stable id — e.g. find "Start a post", "Post", "Send", "Like", "Comment", "Follow", "Connect", "Next", "Save". Returns ranked candidates with stable CSS selectors. Call this before clickElement when you cannot find a reliable selector in the page context.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The button text or label to find (e.g. "Start a post", "Post", "Send", "Like"). Matching is fuzzy and case-insensitive.' },
+        limit: { type: 'number', description: 'Maximum number of ranked candidates to return (default 5)' }
+      },
+      required: ['query']
+    },
+    execute: ({ query, limit = 5 }) => sendToContentScript('FIND_ACTION_BUTTON', { query, limit })
   },
 
   {

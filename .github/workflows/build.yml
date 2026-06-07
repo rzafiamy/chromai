@@ -39,10 +39,15 @@ jobs:
           name: chromai-extension
           path: chromai-extension.zip
 
+      - name: Extract Release Notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/extract-changelog.js ${{ github.ref_name }} release-notes.md
+
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: chromai-extension.zip
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

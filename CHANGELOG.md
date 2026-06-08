@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-07
+
+### Added
+- **Rich MCP Server Integration**: Native integration with Model Context Protocol (MCP) servers, allowing ChromAI to dynamically discover and execute custom external tools.
+- **MCP Configuration Dashboard**: Redesigned settings interface to manage multiple MCP servers. Users can configure server name, endpoint URL, transport type (HTTP POST or SSE), and custom headers in JSON format (e.g., authorization keys).
+- **Automated Tool Bridging**: Plugs directly into Lemura's native `MCPClientRegistry` to bridge discovered MCP tools dynamically, making them transparently available to the agent's reasoning loop.
+
 ## [1.3.0] - 2026-06-07
 
 ### Added

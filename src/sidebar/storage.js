@@ -22,7 +22,8 @@ const DEFAULTS = {
   temperature: 0.0,
   toolRegistryTimeoutMs: 30000,
   maxRetries: 1,
-  baseDelayMs: 1000
+  baseDelayMs: 1000,
+  mcpServers: []
 };
 
 export async function getSettings() {

@@ -335,8 +335,24 @@ export const createBrowserSession = ({ settings }) => {
     toolRegistryTimeoutMs: settings.toolRegistryTimeoutMs ?? 30000,
     maxTokensPerTool: settings.maxTokensPerTool,
     systemPrompt: buildSystemPrompt(settings.systemPrompt),
+    mcpServers: (settings.mcpServers || []).filter(srv => srv.enabled !== false),
     onTrace: tracer
   });
+
+  if (session.mcpReady) {
+    session.mcpReady.then(() => {
+      for (const srv of settings.mcpServers || []) {
+        if (srv.enabled !== false && srv.disabledTools && Array.isArray(srv.disabledTools)) {
+          for (const tool of srv.disabledTools) {
+            session.toolRegistry.unregister(tool);
+            console.log(`[ChromAI] Unregistered disabled MCP tool: ${tool}`);
+          }
+        }
+      }
+    }).catch(err => {
+      console.error('[ChromAI] Error during MCP registration:', err);
+    });
+  }
 
   session.cognitiveStats = {
     turns: 0,

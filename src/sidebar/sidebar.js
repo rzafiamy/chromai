@@ -257,6 +257,17 @@ document.getElementById('user-input').addEventListener('input', ({ target }) => 
 document.getElementById('btn-settings').addEventListener('click', () => chrome.runtime.openOptionsPage());
 document.getElementById('btn-clear').addEventListener('click', clearChat);
 
+// ── Light / dark theme (Microsoft 365 Fluent) — persisted in chrome.storage.sync ──
+const applyTheme = (theme) => {
+  document.body.classList.toggle('dark-theme', theme === 'dark');
+};
+chrome.storage.sync.get({ theme: 'light' }, ({ theme }) => applyTheme(theme));
+document.getElementById('btn-theme').addEventListener('click', () => {
+  const next = document.body.classList.contains('dark-theme') ? 'light' : 'dark';
+  applyTheme(next);
+  chrome.storage.sync.set({ theme: next });
+});
+
 document.getElementById('btn-mic').addEventListener('click', () => {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     stopRecording();

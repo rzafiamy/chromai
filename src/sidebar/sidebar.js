@@ -1,6 +1,6 @@
 import { createBrowserSession, createAdapter } from './agent.js';
 import { getSettings, saveHistory, loadHistory, clearHistory } from './storage.js';
-import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats, setSendButtonState } from './ui.js';
+import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats, setSendButtonState, renderWelcome } from './ui.js';
 import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion, setOnRegionAutoExpand, sendToContentScript } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
 import { prepareContext, resetSessionContext } from './context.js';
@@ -172,6 +172,8 @@ const clearChat = async () => {
   await clearHistory();
   await initSession(false);
   resetCognitiveStats(currentSettings?.maxSteps || 30, currentSettings?.contextWindow || 16000);
+  // Nothing in session now — restore the empty page with the ChromAI icon.
+  renderWelcome();
   showToast('Chat cleared');
 };
 

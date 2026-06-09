@@ -94,9 +94,31 @@ const makeCopyButton = (text) => {
   return btn;
 };
 
+// The empty-session screen: ChromAI icon + greeting + quick-prompt chips.
+// Shown whenever the messages container holds no conversation (initial load,
+// and after the chat is cleared). Kept in one place so both paths stay in sync.
+export const renderWelcome = () => {
+  const container = messagesEl();
+  if (!container || container.querySelector('.welcome-message')) return;
+  const div = document.createElement('div');
+  div.className = 'welcome-message';
+  div.innerHTML = `
+    <div class="welcome-logo">
+      <img src="${new URL('../../public/icons/icon-128.png', import.meta.url).href}" class="welcome-logo-img" alt="ChromAI">
+    </div>
+    <p class="welcome-title">Hi, I'm ChromAI</p>
+    <p class="welcome-sub">Your AI browser copilot. Ask me to read, summarize, click, or interact with this page.</p>
+    <div class="welcome-chips">
+      <button class="welcome-chip" data-prompt="Summarize this page">Summarize page</button>
+      <button class="welcome-chip" data-prompt="Extract all links from this page">Extract links</button>
+      <button class="welcome-chip" data-prompt="What are the main topics on this page?">Main topics</button>
+    </div>`;
+  container.appendChild(div);
+};
+
 export const renderMessage = (role, content) => {
   const container = messagesEl();
-  
+
   // Clear the welcome message screen on the first prompt
   const welcomeEl = container.querySelector('.welcome-message');
   if (welcomeEl) {

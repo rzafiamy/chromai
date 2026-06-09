@@ -43,7 +43,7 @@ const sendMessage = (tabId, payload) =>
     });
   });
 
-const sendToContentScript = async (action, params = {}) => {
+export const sendToContentScript = async (action, params = {}) => {
   throwIfAborted();
   const tab = await getActiveTab();
   const payload = { action, ...params };

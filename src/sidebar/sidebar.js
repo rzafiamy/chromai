@@ -1,8 +1,9 @@
 import { createBrowserSession, createAdapter } from './agent.js';
 import { getSettings, saveHistory, loadHistory, clearHistory } from './storage.js';
 import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats, setSendButtonState } from './ui.js';
-import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion, setOnRegionAutoExpand } from './tools.js';
+import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion, setOnRegionAutoExpand, sendToContentScript } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
+import { prepareContext, resetSessionContext } from './context.js';
 import { isAbortError } from './abort.js';
 
 let session = null;
@@ -72,6 +73,24 @@ const handleSubmit = async (userText) => {
 
   try {
     const ctx = await capturePageContext();
+
+    // Enrich with decomposed URL (every turn) + AI page profile (once per
+    // session). Non-fatal: enrichment failures must never block the message.
+    if (ctx) {
+      try {
+        const adapter = createAdapter(currentSettings);
+        const { urlParts, pageProfile } = await prepareContext(ctx, {
+          adapter,
+          settings: currentSettings,
+          sendToContentScript,
+          captureVisual: captureViewportBase64
+        });
+        ctx.urlParts = urlParts;
+        ctx.pageProfile = pageProfile;
+      } catch {
+        // Best-effort — proceed with the raw context if enrichment fails.
+      }
+    }
 
     if (ctx && currentSettings.visualContext) {
       try {
@@ -149,6 +168,7 @@ const clearChat = async () => {
     try { session.reset(); } catch { /* ignore */ }
   }
   session = null;
+  resetSessionContext();
   await clearHistory();
   await initSession(false);
   resetCognitiveStats(currentSettings?.maxSteps || 30, currentSettings?.contextWindow || 16000);
@@ -374,6 +394,8 @@ chrome.runtime.onMessage.addListener(({ action, selector }) => {
   // Clear focus region when navigating to a new tab
   setFocusRegion(null);
   updatePickerUI();
+  // New tab → new page: drop the cached page profile so the next turn re-classifies.
+  resetSessionContext();
   // Start a fresh session for the new tab — history from previous tab is irrelevant
   if (session) {
     try { session.reset(); } catch { /* ignore */ }

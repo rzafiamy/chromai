@@ -94,25 +94,165 @@ const makeCopyButton = (text) => {
   return btn;
 };
 
+// ── Welcome screen helpers ─────────────────────────────────────────────────
+
+/** Return a friendly time-of-day word and a weekday label. */
+const getTimeContext = () => {
+  const now = new Date();
+  const h = now.getHours();
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const weekday = days[now.getDay()];
+  let period;
+  if (h < 12)      period = 'morning';
+  else if (h < 17) period = 'afternoon';
+  else if (h < 21) period = 'evening';
+  else             period = 'night';
+  return { weekday, period };
+};
+
+/** Parse domain from a URL string. Returns null on failure. */
+const parseDomain = (url) => {
+  try {
+    const u = new URL(url);
+    // Strip leading "www."
+    return u.hostname.replace(/^www\./, '');
+  } catch { return null; }
+};
+
+/**
+ * Domain-aware chip definitions.
+ * Each rule: { match: RegExp, chips: [{ label, prompt }] }
+ */
+const DOMAIN_CHIPS = [
+  { match: /github\.com/,
+    chips: [
+      { label: '📝 Summarize repo', prompt: 'Summarize this GitHub repository: what does it do, main languages, and recent activity.' },
+      { label: '🐛 List open issues', prompt: 'List the open issues or PRs on this page.' },
+      { label: '📦 README summary', prompt: 'Summarize the README of this repository.' }
+    ]
+  },
+  { match: /youtube\.com|youtu\.be/,
+    chips: [
+      { label: '🎬 Describe video', prompt: 'What is this YouTube video about? Give me a quick summary.' },
+      { label: '📋 List videos', prompt: 'List all the video titles visible on this page.' },
+      { label: '💬 Read comments', prompt: 'Read the top comments on this video.' }
+    ]
+  },
+  { match: /twitter\.com|x\.com/,
+    chips: [
+      { label: '🐦 Summarize feed', prompt: 'Summarize the top posts or tweets visible on this page.' },
+      { label: '🔍 Find trending', prompt: 'What trending topics or hashtags are visible on this page?' },
+      { label: '📌 Read thread', prompt: 'Read and summarize the thread on this page.' }
+    ]
+  },
+  { match: /linkedin\.com/,
+    chips: [
+      { label: '👤 Summarize profile', prompt: 'Summarize the LinkedIn profile on this page.' },
+      { label: '💼 List jobs', prompt: 'List the job postings visible on this page.' },
+      { label: '📰 Summarize feed', prompt: 'Summarize the most relevant posts in my feed.' }
+    ]
+  },
+  { match: /notion\.so|notion\.site/,
+    chips: [
+      { label: '📄 Summarize page', prompt: 'Summarize the content of this Notion page.' },
+      { label: '☑️ List tasks', prompt: 'List all tasks or to-dos visible on this page.' },
+      { label: '🔗 Extract links', prompt: 'Extract all links or references on this Notion page.' }
+    ]
+  },
+  { match: /stackoverflow\.com|stackexchange\.com/,
+    chips: [
+      { label: '✅ Best answer', prompt: 'What is the best answer to this Stack Overflow question? Summarize it.' },
+      { label: '❓ Question summary', prompt: 'Summarize the question being asked on this page.' },
+      { label: '📋 List answers', prompt: 'List all answers and their vote counts on this page.' }
+    ]
+  },
+  { match: /reddit\.com/,
+    chips: [
+      { label: '📖 Summarize thread', prompt: 'Summarize this Reddit thread: the post and top comments.' },
+      { label: '💬 Top comments', prompt: 'Read and list the top 5 comments in this Reddit thread.' },
+      { label: '🏷️ Post details', prompt: 'What is this post about? Give me the key details.' }
+    ]
+  },
+  { match: /google\.com\/search|bing\.com\/search|duckduckgo\.com/,
+    chips: [
+      { label: '🔍 Summarize results', prompt: 'Summarize the top search results visible on this page.' },
+      { label: '🔗 Extract links', prompt: 'List all result links and their descriptions.' },
+      { label: '📰 Find best result', prompt: 'Which result looks most relevant to the query? Explain why.' }
+    ]
+  },
+  { match: /docs\.|documentation|readme|readthedocs/,
+    chips: [
+      { label: '📘 Summarize docs', prompt: 'Summarize this documentation page.' },
+      { label: '💡 Key concepts', prompt: 'What are the key concepts or APIs described on this page?' },
+      { label: '🔍 Find examples', prompt: 'Find and list any code examples on this page.' }
+    ]
+  },
+];
+
+const DEFAULT_CHIPS = [
+  { label: 'Summarize page', prompt: 'Summarize this page' },
+  { label: 'Extract links', prompt: 'Extract all links from this page' },
+  { label: 'Main topics', prompt: 'What are the main topics on this page?' },
+];
+
+/** Return chip definitions appropriate for the given URL. */
+const chipsFor = (url) => {
+  if (url) {
+    for (const rule of DOMAIN_CHIPS) {
+      if (rule.match.test(url)) return rule.chips;
+    }
+  }
+  return DEFAULT_CHIPS;
+};
+
 // The empty-session screen: ChromAI icon + greeting + quick-prompt chips.
-// Shown whenever the messages container holds no conversation (initial load,
-// and after the chat is cleared). Kept in one place so both paths stay in sync.
-export const renderWelcome = () => {
+// Accepts optional context: { url, title } from the active tab.
+// Kept in one place so both paths (initial load + clear chat) stay in sync.
+export const renderWelcome = (tabCtx = null) => {
   const container = messagesEl();
   if (!container || container.querySelector('.welcome-message')) return;
+
+  const { weekday, period } = getTimeContext();
+  const domain  = tabCtx?.url   ? parseDomain(tabCtx.url) : null;
+  const title   = tabCtx?.title ? tabCtx.title.trim()     : null;
+  const chips   = chipsFor(tabCtx?.url);
+
+  // Build greeting
+  const greeting = domain
+    ? `Good ${period}! I'm ChromAI, your AI browser copilot.`
+    : `Hi, I'm ChromAI — your AI browser copilot.`;
+
+  // Build sub-line with domain + time context
+  const sub = domain
+    ? `On this ${weekday} ${period} I'm ready to help you navigate <strong>${escapeHtml(domain)}</strong>${title ? ` — <em>${escapeHtml(title.slice(0, 60))}${title.length > 60 ? '…' : ''}</em>` : ''}. Ask me anything.`
+    : `Ask me to read, summarize, click, or interact with this page.`;
+
+  // Debug info strip (domain + local time — useful for development)
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const debugInfo = domain
+    ? `<div class="welcome-debug">
+        <span class="welcome-debug-item">🌐 ${escapeHtml(domain)}</span>
+        <span class="welcome-debug-sep">·</span>
+        <span class="welcome-debug-item">🕐 ${weekday}, ${timeStr}</span>
+        ${tabCtx?.url ? `<span class="welcome-debug-sep">·</span><span class="welcome-debug-item welcome-debug-url" title="${escapeHtml(tabCtx.url)}">${escapeHtml(tabCtx.url.slice(0, 48))}${tabCtx.url.length > 48 ? '…' : ''}</span>` : ''}
+      </div>`
+    : '';
+
+  const chipsHtml = chips.map(c =>
+    `<button class="welcome-chip" data-prompt="${escapeHtml(c.prompt)}">${c.label}</button>`
+  ).join('');
+
   const div = document.createElement('div');
   div.className = 'welcome-message';
   div.innerHTML = `
     <div class="welcome-logo">
       <img src="${new URL('../../public/icons/icon-128.png', import.meta.url).href}" class="welcome-logo-img" alt="ChromAI">
     </div>
-    <p class="welcome-title">Hi, I'm ChromAI</p>
-    <p class="welcome-sub">Your AI browser copilot. Ask me to read, summarize, click, or interact with this page.</p>
-    <div class="welcome-chips">
-      <button class="welcome-chip" data-prompt="Summarize this page">Summarize page</button>
-      <button class="welcome-chip" data-prompt="Extract all links from this page">Extract links</button>
-      <button class="welcome-chip" data-prompt="What are the main topics on this page?">Main topics</button>
-    </div>`;
+    <p class="welcome-title">${escapeHtml(greeting)}</p>
+    <p class="welcome-sub">${sub}</p>
+    ${debugInfo}
+    <div class="welcome-chips">${chipsHtml}</div>`;
   container.appendChild(div);
 };
 

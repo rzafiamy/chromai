@@ -277,6 +277,41 @@ body.dark-theme .icon-btn .sun-icon { display: block; }
   color: var(--accent-hover);
 }
 
+/* ── Welcome debug context strip ── */
+.welcome-debug {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+.welcome-debug-item {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.welcome-debug-url {
+  color: var(--accent);
+  opacity: 0.7;
+  max-width: 160px;
+}
+.welcome-debug-sep {
+  font-size: 10px;
+  color: var(--border-light);
+  flex-shrink: 0;
+}
+
+
 /* ── Messages ── */
 .message {
   display: flex;

@@ -174,8 +174,9 @@ const clearChat = async () => {
   await clearHistory();
   await initSession(false);
   resetCognitiveStats(currentSettings?.maxSteps || 30, currentSettings?.contextWindow || 16000);
-  // Nothing in session now — restore the empty page with the ChromAI icon.
-  renderWelcome();
+  // Refresh welcome with current tab context
+  const tabCtx = await getActiveTabContext();
+  renderWelcome(tabCtx);
   showToast('Chat cleared');
   logSystem('Chat cleared — new session started');
 };
@@ -435,8 +436,30 @@ if (btnCognitiveStats && popupCognitiveStats) {
   });
 }
 
-initSession();
-logSystem('Session initialized');
+/** Safely query the active tab — returns { url, title } or null. */
+const getActiveTabContext = async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) return null;
+    return { url: tab.url || '', title: tab.title || '' };
+  } catch {
+    return null;
+  }
+};
+
+// ── Startup: fetch active tab context then initialise session ──
+(async () => {
+  const tabCtx = await getActiveTabContext();
+  // Paint the contextual welcome screen immediately (before session init)
+  // so the user sees domain + time-of-day greeting without waiting.
+  const messagesContainer = document.getElementById('messages');
+  if (messagesContainer) messagesContainer.innerHTML = '';
+  renderWelcome(tabCtx);
+
+  await initSession();
+  logSystem(`Session initialized${tabCtx?.url ? ' · ' + tabCtx.url : ''}`);
+})();
+
 
 // ── Log Viewer Panel ──────────────────────────────────────────────────────
 

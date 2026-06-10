@@ -381,7 +381,9 @@ const TOOL_LABELS = {
   ocrRegion: 'Extracting text from region'
 };
 
-export const showConfirm = ({ toolName, description, detail, notFound = false, abortHandle }) =>
+// Resolves true (confirm), false (cancel), or 'retarget' when the user wants to
+// pick a different target element for the action (allowRetarget only).
+export const showConfirm = ({ toolName, description, detail, notFound = false, allowRetarget = false, abortHandle }) =>
   new Promise((resolve) => {
     const overlay = document.getElementById('confirm-overlay');
     const card = document.createElement('div');
@@ -404,9 +406,10 @@ export const showConfirm = ({ toolName, description, detail, notFound = false, a
       ${detail ? `<code class="confirm-detail">${escapeHtml(detail)}</code>` : ''}
       ${notFound
         ? `<div class="confirm-warning">⚠ Could not locate this element on the page — it may have changed. Confirm only if you understand the action.</div>`
-        : `<div class="confirm-hint">The target is outlined in red on the page.</div>`}
+        : `<div class="confirm-hint">The target is outlined in red on the page.${allowRetarget ? ' Wrong element? Use "Change target" to click the right one.' : ''}</div>`}
       <div class="confirm-actions">
         <button class="confirm-btn confirm-cancel">Cancel</button>
+        ${allowRetarget ? '<button class="confirm-btn confirm-retarget" title="Pick a different element on the page for this action">🎯 Change target</button>' : ''}
         <button class="confirm-btn confirm-ok">Confirm</button>
       </div>
     `;
@@ -426,6 +429,7 @@ export const showConfirm = ({ toolName, description, detail, notFound = false, a
     const okBtn = card.querySelector('.confirm-ok');
     okBtn.addEventListener('click', () => finish(true));
     card.querySelector('.confirm-cancel').addEventListener('click', () => finish(false));
+    card.querySelector('.confirm-retarget')?.addEventListener('click', () => finish('retarget'));
 
     // Keyboard: Enter confirms, Escape cancels — so the user never has to "click
     // dumbly". Capture phase so it wins over page handlers.

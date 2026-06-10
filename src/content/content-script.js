@@ -1000,10 +1000,13 @@ const handlers = {
   },
 
   FIND_COMMENT_BOX() {
-    // Ordered from most specific to most generic
+    // Ordered from most specific to most generic. Covers comment/reply boxes AND
+    // chat/DM composers (Facebook Messenger popups, Instagram DM, LinkedIn
+    // messaging) which are labeled "Message"/"Écrivez…", never "comment".
     const candidates = querySelectorAllDeep(
       'textarea[placeholder*="comment" i], textarea[placeholder*="reply" i], ' +
       'textarea[placeholder*="Write" i], textarea[placeholder*="Add" i], ' +
+      'textarea[placeholder*="message" i], ' +
       'textarea[placeholder*="commentaire" i], textarea[placeholder*="réponse" i], ' +
       '[contenteditable="true"][placeholder*="comment" i], ' +
       '[contenteditable="true"][placeholder*="reply" i], ' +
@@ -1011,8 +1014,14 @@ const handlers = {
       '[contenteditable="true"][aria-label*="comment" i], ' +
       '[contenteditable="true"][aria-label*="reply" i], ' +
       '[contenteditable="true"][aria-label*="Add a comment" i], ' +
+      '[contenteditable="true"][aria-label*="message" i], ' +
+      '[contenteditable="true"][data-placeholder*="message" i], ' +
+      '[contenteditable="true"][aria-placeholder*="message" i], ' +
+      '[contenteditable="true"][aria-label*="écri" i], ' +
       '[role="textbox"][aria-label*="comment" i], ' +
-      '[role="textbox"][aria-label*="reply" i]'
+      '[role="textbox"][aria-label*="reply" i], ' +
+      '[role="textbox"][aria-label*="message" i], ' +
+      '[role="textbox"][aria-label*="écri" i]'
     );
 
     // Also check for comment form containers
@@ -1026,7 +1035,14 @@ const handlers = {
       Array.from(form.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]'))
     );
 
-    const all = [...candidates, ...formInputs];
+    // Last-resort fallback: chat popups render the composer as an unlabeled
+    // contenteditable textbox inside a dialog — appended last so specific
+    // matches above always win.
+    const dialogBoxes = querySelectorAllDeep(
+      '[role="dialog"] [contenteditable="true"], [role="dialog"] [role="textbox"], [role="dialog"] textarea'
+    );
+
+    const all = [...candidates, ...formInputs, ...dialogBoxes];
     const seen = new Set();
     const unique = all.filter(el => {
       if (seen.has(el)) return false;
@@ -1039,11 +1055,14 @@ const handlers = {
 
     const el = unique[0];
 
-    // Build a best-effort unique selector
+    // Build a best-effort unique selector. Qualify aria-label with the editable
+    // marker — on Facebook both the "Message" BUTTON and the chat composer carry
+    // aria-label="Message", and a bare [aria-label=…] would match the button.
     let selector = null;
+    const editableQualifier = el.isContentEditable ? '[contenteditable="true"]' : (el.getAttribute('role') === 'textbox' ? '[role="textbox"]' : '');
     if (el.id) selector = `#${CSS.escape(el.id)}`;
     else if (el.getAttribute('data-testid')) selector = `[data-testid="${el.getAttribute('data-testid')}"]`;
-    else if (el.getAttribute('aria-label')) selector = `[aria-label="${el.getAttribute('aria-label')}"]`;
+    else if (el.getAttribute('aria-label')) selector = `${el.tagName.toLowerCase()}${editableQualifier}[aria-label="${el.getAttribute('aria-label')}"]`;
     else {
       const tag = el.tagName.toLowerCase();
       const cls = Array.from(el.classList).slice(0, 2).map(c => `.${CSS.escape(c)}`).join('');
@@ -1153,6 +1172,15 @@ const handlers = {
   // elements, and anything that only responds to real pointer events (not synthetic clicks
   // routed through a CSS selector).
   async CLICK_AT_COORDINATES({ x, y, waitAfterMs = 500 } = {}) {
+    const norm = normalizeViewportPoint(x, y);
+    x = norm.x; y = norm.y;
+    if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
+      return {
+        success: false,
+        error: `Point (${x}, ${y}) is outside the viewport (${window.innerWidth}×${window.innerHeight} CSS px). ` +
+          'Do not estimate coordinates from a screenshot — use the exact cx/cy values from getLabeledScreenshot\'s elements table, or click the element\'s selector instead.'
+      };
+    }
     const el = document.elementFromPoint(x, y);
     if (!el) return { success: false, error: `No element at (${x}, ${y})` };
 
@@ -1487,6 +1515,19 @@ function _clearRegionHighlight() {
   _regionHighlightSelector = null;
 }
 
+// Screenshots from captureVisibleTab are in PHYSICAL pixels on scaled displays,
+// while elementFromPoint expects CSS pixels. If a point falls outside the
+// viewport but fits after dividing by the device pixel ratio, assume it was
+// estimated from a screenshot and convert.
+function normalizeViewportPoint(x, y) {
+  const dpr = window.devicePixelRatio || 1;
+  if (dpr !== 1 && (x > window.innerWidth || y > window.innerHeight) &&
+      x / dpr <= window.innerWidth && y / dpr <= window.innerHeight) {
+    return { x: Math.round(x / dpr), y: Math.round(y / dpr), corrected: true };
+  }
+  return { x, y, corrected: false };
+}
+
 // ── Confirm highlight ──────────────────────────────────────────────────────────
 // Persistent RED overlay shown while the firewall confirm modal is open, so the
 // user can see exactly which element(s) the pending action will touch. Unlike
@@ -1509,13 +1550,24 @@ function _ensureConfirmPulseStyle() {
 // selectors: array of CSS selectors (one per element the action will hit).
 // rootSelector: active focus region, so we highlight the SAME element the
 // region-aware action will resolve.
-function _showConfirmHighlight(selectors = [], rootSelector) {
+// point: {x, y} for coordinate-based clicks — highlights the element under
+// that point (the one elementFromPoint will hit) so the user isn't blind.
+function _showConfirmHighlight(selectors = [], rootSelector, point) {
   _clearConfirmHighlight();
   _ensureConfirmPulseStyle();
 
+  const labels = [...selectors];
   const els = selectors
     .map((sel) => resolveActionTarget(sel, rootSelector).el)
     .filter(Boolean);
+  if (point && typeof point.x === 'number' && typeof point.y === 'number') {
+    const { x, y } = normalizeViewportPoint(point.x, point.y);
+    const el = document.elementFromPoint(x, y);
+    if (el) {
+      els.push(el);
+      labels.push(`click @ (${x}, ${y}) → ${el.tagName.toLowerCase()}`);
+    }
+  }
   if (!els.length) return { highlighted: 0 };
 
   // Bring the first target into view so an off-screen element isn't approved blind.
@@ -1531,7 +1583,7 @@ function _showConfirmHighlight(selectors = [], rootSelector) {
       overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '16px',
       fontWeight: '700'
     });
-    label.textContent = selectors[i] || '';
+    label.textContent = labels[i] || '';
 
     const overlay = document.createElement('div');
     Object.assign(overlay.style, {
@@ -1593,7 +1645,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (action === 'EXIT_PICK_MODE')        { _exitPickMode();  sendResponse({ success: true }); return false; }
   if (action === 'HIGHLIGHT_REGION')      { _showRegionHighlight(params.selector); sendResponse({ success: true }); return false; }
   if (action === 'CLEAR_REGION_HIGHLIGHT'){ _clearRegionHighlight(); sendResponse({ success: true }); return false; }
-  if (action === 'CONFIRM_HIGHLIGHT')     { sendResponse({ success: true, ..._showConfirmHighlight(params.selectors, params.rootSelector) }); return false; }
+  if (action === 'CONFIRM_HIGHLIGHT')     { sendResponse({ success: true, ..._showConfirmHighlight(params.selectors, params.rootSelector, params.point) }); return false; }
   if (action === 'CLEAR_CONFIRM_HIGHLIGHT'){ _clearConfirmHighlight(); sendResponse({ success: true }); return false; }
 
   const handler = handlers[action];

@@ -16,12 +16,72 @@ export const getFocusRegion = () => _focusRegion;
 let _onRegionAutoExpand = null;
 export const setOnRegionAutoExpand = (fn) => { _onRegionAutoExpand = fn; };
 
+// Sidebar hook fired when the AGENT requests an element pick from the user
+// (askUserToPickElement tool or the confirm modal's "Change target").
+// state: 'start' (lookingFor set) | 'end'.
+let _onAgentPick = null;
+export const setOnAgentPick = (fn) => { _onAgentPick = fn; };
+
+// True while an agent-initiated pick is running — sidebar.js uses this to skip
+// its manual-picker handler (which would set the focus region as a side effect).
+let _agentPickActive = false;
+export const isAgentPickActive = () => _agentPickActive;
+
+// User-corrected target: set when the user re-picks the element an action
+// should hit from the confirm modal. Consumed (once) by the next execution of
+// that tool, overriding the model-proposed selector.
+let _selectorOverride = null;
+export const setSelectorOverride = (toolName, selector) => { _selectorOverride = { toolName, selector }; };
+const consumeSelectorOverride = (toolName) => {
+  if (_selectorOverride?.toolName !== toolName) return null;
+  const { selector } = _selectorOverride;
+  _selectorOverride = null;
+  return selector;
+};
+
 // Active abort handle for the running agent. Set by agent.js per run so that tool
 // calls stop firing the moment the user presses Stop, rather than draining the
 // whole queued tool chain.
 let _abortHandle = null;
 export const setAbortHandle = (handle) => { _abortHandle = handle; };
 const throwIfAborted = () => { if (_abortHandle?.aborted) throw new AbortError(); };
+
+// Activate the on-page element picker and wait for the user's click.
+// Returns { picked: true, selector } | { picked: false, cancelled?|timedOut? }.
+// No side effects on the focus region — callers decide what the pick means.
+export const requestUserPick = async (lookingFor) => {
+  await sendToContentScript('ENTER_PICK_MODE');
+  _agentPickActive = true;
+  _onAgentPick?.('start', lookingFor);
+
+  let removeListener = () => {};
+  const pickPromise = new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      removeListener();
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const listener = (message) => {
+      if (message?.action === 'REGION_PICKED') finish({ picked: true, selector: message.selector });
+      else if (message?.action === 'REGION_PICK_CANCELLED') finish({ picked: false, cancelled: true });
+    };
+    removeListener = () => chrome.runtime.onMessage.removeListener(listener);
+    chrome.runtime.onMessage.addListener(listener);
+    const timer = setTimeout(() => finish({ picked: false, timedOut: true }), 120000);
+  });
+
+  try {
+    return _abortHandle ? await _abortHandle.race(pickPromise) : await pickPromise;
+  } finally {
+    removeListener();
+    _agentPickActive = false;
+    _onAgentPick?.('end');
+    try { sendToContentScript('EXIT_PICK_MODE').catch(() => {}); } catch { /* aborted */ }
+  }
+};
 
 const getActiveTab = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -235,6 +295,7 @@ export const browserTools = [
       required: ['selector']
     },
     execute: async ({ selector, waitAfterMs = 800 }) => {
+      selector = consumeSelectorOverride('clickElement') ?? selector;
       const result = await sendToContentScript('CLICK_ELEMENT', { selector, waitAfterMs, rootSelector: _focusRegion || undefined });
       // Auto-expand the focus region to a dialog the click just opened (it was
       // portaled outside the region, so the agent now needs to act inside it).
@@ -286,7 +347,10 @@ export const browserTools = [
       },
       required: ['selector']
     },
-    execute: ({ selector }) => sendToContentScript('SUBMIT_FORM', { selector, rootSelector: _focusRegion || undefined })
+    execute: ({ selector }) => sendToContentScript('SUBMIT_FORM', {
+      selector: consumeSelectorOverride('submitForm') ?? selector,
+      rootSelector: _focusRegion || undefined
+    })
   },
 
   {
@@ -389,7 +453,7 @@ export const browserTools = [
 
   {
     name: 'analyzePageVisually',
-    description: 'Take a screenshot of the visible page and analyze it using vision/OCR. Use this when: the page content cannot be extracted as text (canvas, image-based UI, PDF viewer, charts), you need to understand visual layout for form filling, or the user asks what they see on screen. Automatically scoped to the active focus region if one is set.',
+    description: 'Take a screenshot of the visible page and analyze it using vision/OCR. Use this when: the page content cannot be extracted as text (canvas, image-based UI, PDF viewer, charts), you need to understand visual layout for form filling, or the user asks what they see on screen. Automatically scoped to the active focus region if one is set. NOTE: this returns a DESCRIPTION only — do NOT derive click coordinates from it. To click something you saw here, use getLabeledScreenshot (exact selectors + cx/cy per element) or findActionButton with the visible label.',
     timeoutMs: 60000,
     parameters: {
       type: 'object',
@@ -457,7 +521,11 @@ export const browserTools = [
       required: ['selector', 'text']
     },
     execute: ({ selector, text, clearFirst = false, pressEnter = false }) =>
-      sendToContentScript('TYPE_TEXT', { selector, text, clearFirst, pressEnter, rootSelector: _focusRegion || undefined })
+      sendToContentScript('TYPE_TEXT', {
+        selector: consumeSelectorOverride('typeText') ?? selector,
+        text, clearFirst, pressEnter,
+        rootSelector: _focusRegion || undefined
+      })
   },
 
   {
@@ -477,6 +545,7 @@ export const browserTools = [
       required: ['key']
     },
     execute: async ({ selector, key, modifiers = [] }) => {
+      selector = consumeSelectorOverride('pressKey') ?? selector;
       const result = await sendToContentScript('PRESS_KEY', { selector, key, modifiers, rootSelector: _focusRegion || undefined });
       // Pressing Enter (with no modifiers) is the primary way to submit AI chat
       // prompts, search queries, and SPA forms. The response always arrives async.
@@ -597,9 +666,41 @@ export const browserTools = [
 
   {
     name: 'findCommentBox',
-    description: 'Locate the comment or reply input box on the current page. Returns the CSS selector, element type, and placeholder text so you can then use typeText or writeToRegion to post a comment. Use this before posting a comment when you are not sure where the input is.',
+    description: 'Locate the comment, reply, or chat/DM message input box on the current page — including Messenger-style chat popups (Facebook, Instagram, LinkedIn messaging). Returns the CSS selector, element type, and placeholder text so you can then use typeText or writeToRegion to write into it. Use this before posting a comment or sending a chat message when you are not sure where the input is.',
     parameters: { type: 'object', properties: {} },
     execute: () => sendToContentScript('FIND_COMMENT_BOX')
+  },
+
+  {
+    name: 'askUserToPickElement',
+    description: 'LAST RESORT when you cannot locate an element: ask the user to click it for you. Activates a visual element picker on the page (crosshair cursor); the user clicks the target element and you receive its CSS selector, which also becomes the active focus region. Use ONLY after discovery tools (findCommentBox, findActionButton, getInteractiveElements) AND visual analysis (getLabeledScreenshot / analyzePageVisually) have all failed to produce a usable selector. Tell the user in "lookingFor" exactly what to click.',
+    timeoutMs: 130000,
+    parameters: {
+      type: 'object',
+      properties: {
+        lookingFor: { type: 'string', description: 'Short, user-facing description of the element the user should click, e.g. "the text input of the chat window with Hasina"' }
+      },
+      required: ['lookingFor']
+    },
+    execute: async ({ lookingFor }) => {
+      const result = await requestUserPick(lookingFor);
+      if (result.picked) {
+        setFocusRegion(result.selector);
+        _onRegionAutoExpand?.(result.selector);
+        return {
+          picked: true,
+          selector: result.selector,
+          note: 'The user clicked this element. It is now the active focus region — use writeToRegion (or typeText) with this selector to act on it.'
+        };
+      }
+      return {
+        picked: false,
+        ...result,
+        note: result.timedOut
+          ? 'The user did not pick an element within 2 minutes. Explain what you were looking for and ask how to proceed.'
+          : 'The user cancelled the picker (Esc). Ask the user how to proceed.'
+      };
+    }
   },
 
   {
@@ -708,7 +809,7 @@ export const browserTools = [
 
   {
     name: 'clickAtCoordinates',
-    description: 'Click at a specific (x, y) viewport coordinate by firing a full mouse/pointer event sequence at that exact pixel position. Use this when: (1) a selector-based click fails or the element has no reliable selector; (2) the target is inside a canvas or heavily transformed container; (3) you got the coordinates from getLabeledScreenshot (use the element\'s cx/cy from the elements list). More reliable than clickElement for canvas-rendered UIs, custom web components, and hover-only menus.',
+    description: 'Click at a specific (x, y) viewport coordinate by firing a full mouse/pointer event sequence at that exact pixel position. ONLY pass coordinates taken verbatim from getLabeledScreenshot\'s elements table (the cx/cy fields) — NEVER estimate coordinates from analyzePageVisually output or by eyeballing a screenshot: visual estimates are in the wrong pixel scale and land on the wrong element. If you have a selector, prefer clickElement. Use this when: (1) a selector-based click fails; (2) the target is inside a canvas or heavily transformed container.',
     parameters: {
       type: 'object',
       properties: {
@@ -719,7 +820,12 @@ export const browserTools = [
       required: ['x', 'y']
     },
     execute: async ({ x, y, waitAfterMs = 500 }) => {
-      const result = await sendToContentScript('CLICK_AT_COORDINATES', { x, y, waitAfterMs });
+      // The user re-targeted this click from the confirm modal — click the
+      // element they picked instead of the model-proposed coordinates.
+      const overrideSelector = consumeSelectorOverride('clickAtCoordinates');
+      const result = overrideSelector
+        ? await sendToContentScript('CLICK_ELEMENT', { selector: overrideSelector, waitAfterMs, rootSelector: _focusRegion || undefined })
+        : await sendToContentScript('CLICK_AT_COORDINATES', { x, y, waitAfterMs });
       if (result?.openedDialog && _focusRegion && result.openedDialog !== _focusRegion) {
         setFocusRegion(result.openedDialog);
         _onRegionAutoExpand?.(result.openedDialog);

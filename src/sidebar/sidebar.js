@@ -1,7 +1,7 @@
 import { createBrowserSession, createAdapter } from './agent.js';
 import { getSettings, saveHistory, loadHistory, clearHistory } from './storage.js';
 import { renderMessage, showTyping, hideTyping, showToast, updateModelBadge, updateAssistantMessage, renderMarkdown, resetCognitiveStats, setSendButtonState, renderWelcome } from './ui.js';
-import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion, setOnRegionAutoExpand, sendToContentScript } from './tools.js';
+import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegion, setOnRegionAutoExpand, setOnAgentPick, isAgentPickActive, sendToContentScript } from './tools.js';
 import { buildMessageWithContext } from './prompt.js';
 import { prepareContext, resetSessionContext } from './context.js';
 import { isAbortError } from './abort.js';
@@ -367,6 +367,18 @@ const clearFocusRegion = async () => {
   await injectAndSend('CLEAR_REGION_HIGHLIGHT').catch(() => {});
 };
 
+// The agent asked the user to click an element it could not find
+// (askUserToPickElement tool). Reflect picker state in the UI and tell the
+// user what to click.
+setOnAgentPick((state, lookingFor) => {
+  isPickerActive = state === 'start';
+  updatePickerUI();
+  if (state === 'start') {
+    showToast(`👆 The agent needs your help — click on: ${lookingFor}`);
+    renderMessage('system', `👆 Please click on the page: ${lookingFor} (Esc to cancel)`);
+  }
+});
+
 // When a click during an agent run opens a dialog outside the focus region,
 // tools.js re-points the region to that dialog. Refresh the pill + highlight here.
 setOnRegionAutoExpand((selector) => {
@@ -385,6 +397,9 @@ document.getElementById('btn-clear-region').addEventListener('click', clearFocus
 // Tab change: reset session + optionally refresh the welcome screen
 chrome.runtime.onMessage.addListener(({ action, selector, tabId }) => {
   if (action === 'REGION_PICKED') {
+    // Agent-initiated picks (askUserToPickElement / confirm-modal retarget) are
+    // consumed by their own listener in tools.js — don't set the focus region.
+    if (isAgentPickActive()) return;
     isPickerActive = false;
     setFocusRegion(selector);
     updatePickerUI();
@@ -393,6 +408,7 @@ chrome.runtime.onMessage.addListener(({ action, selector, tabId }) => {
     return;
   }
   if (action === 'REGION_PICK_CANCELLED') {
+    if (isAgentPickActive()) return;
     isPickerActive = false;
     updatePickerUI();
     return;

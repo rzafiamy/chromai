@@ -144,9 +144,9 @@ import {
   updateCognitiveStats
 } from './ui.js';
 import { buildSystemPrompt } from './prompt.js';
-import { describeToolCall, selectorsForToolCall, showConfirmHighlight, clearConfirmHighlight } from './skills.js';
+import { describeToolCall, selectorsForToolCall, pointForToolCall, showConfirmHighlight, clearConfirmHighlight } from './skills.js';
 import { AbortHandle, AbortError } from './abort.js';
-import { setAbortHandle } from './tools.js';
+import { setAbortHandle, requestUserPick, setSelectorOverride } from './tools.js';
 import { logEvent } from './logger.js';
 
 const makeFirewall = (getHandle) => ({
@@ -156,6 +156,7 @@ const makeFirewall = (getHandle) => ({
     { name: 'typeText',     decision: 'ask', reason: 'Will type text into an element on the page' },
     { name: 'pressKey',     decision: 'ask', reason: 'Will press a key on the page' },
     { name: 'clickElement', decision: 'ask', reason: 'Will click an element on the page' },
+    { name: 'clickAtCoordinates', decision: 'ask', reason: 'Will click at screen coordinates on the page' },
     { name: 'submitForm',   decision: 'ask', reason: 'Will submit a form on the page' },
     { name: 'navigateTo',   decision: 'ask', reason: 'Will navigate to a new URL on the same site' },
   ],
@@ -164,24 +165,63 @@ const makeFirewall = (getHandle) => ({
     // If the user already pressed Stop, never raise a modal — deny straight away.
     if (abortHandle.aborted) return false;
 
-    // Mark the exact element(s) this action will touch with a persistent red,
-    // pulsing border and scroll the first one into view — so the user can SEE
-    // what they're approving instead of confirming blind. Stays up for the whole
-    // decision; cleared once the modal settles (confirm / cancel / Stop).
-    const selectors = selectorsForToolCall(toolName, argsJson);
-    const highlighted = await showConfirmHighlight(selectors);
+    // Single-selector actions can be re-targeted from the modal: the user picks
+    // the correct element on the page and the action runs on THAT selector
+    // instead of the model-proposed one (applied via setSelectorOverride).
+    let args = null;
+    try { args = JSON.parse(argsJson); } catch { /* leave null */ }
+    const retargetable = !!args && (
+      (typeof args.selector === 'string' &&
+        ['clickElement', 'typeText', 'pressKey', 'submitForm'].includes(toolName)) ||
+      (toolName === 'clickAtCoordinates' &&
+        typeof args.x === 'number' && typeof args.y === 'number')
+    );
+    let currentJson = argsJson;
+    let pickedSelector = null;
 
-    const { description, detail } = describeToolCall(toolName, argsJson);
     try {
-      // showConfirm resolves false the instant Stop is pressed (abort-aware modal).
-      return await showConfirm({
-        toolName,
-        description,
-        detail,
-        // Warn the user if we couldn't locate the target so they don't approve blind.
-        notFound: selectors.length > 0 && highlighted === 0,
-        abortHandle: getHandle()
-      });
+      // Loop: a "Change target" choice re-picks the element, then re-confirms
+      // with the new target highlighted.
+      for (;;) {
+        // Mark the exact element(s) this action will touch with a persistent red,
+        // pulsing border and scroll the first one into view — so the user can SEE
+        // what they're approving instead of confirming blind. Stays up for the
+        // whole decision; cleared once the modal settles (confirm / cancel / Stop).
+        const selectors = selectorsForToolCall(toolName, currentJson);
+        // Coordinate clicks: highlight the element UNDER the point so the user
+        // sees what elementFromPoint will actually hit, not just numbers.
+        const point = pointForToolCall(toolName, currentJson);
+        const highlighted = await showConfirmHighlight(selectors, point);
+
+        const { description, detail } = describeToolCall(toolName, currentJson);
+        // showConfirm resolves false the instant Stop is pressed (abort-aware modal).
+        const choice = await showConfirm({
+          toolName,
+          description,
+          detail,
+          // Warn the user if we couldn't locate the target so they don't approve blind.
+          notFound: (selectors.length > 0 || !!point) && highlighted === 0,
+          allowRetarget: retargetable,
+          abortHandle: getHandle()
+        });
+
+        if (choice === 'retarget') {
+          await clearConfirmHighlight();
+          const pick = await requestUserPick(`the element ${toolName} should act on`);
+          if (pick?.picked && pick.selector) {
+            pickedSelector = pick.selector;
+            args.selector = pick.selector;
+            currentJson = JSON.stringify(args);
+          }
+          continue;
+        }
+
+        if (choice && pickedSelector) setSelectorOverride(toolName, pickedSelector);
+        return choice === true;
+      }
+    } catch {
+      // Stop pressed while the picker was open — deny the action.
+      return false;
     } finally {
       await clearConfirmHighlight();
     }

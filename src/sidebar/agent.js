@@ -33,29 +33,60 @@ ${completed.map((sg) => `- \u2705 ${sg}`).join("\n")}
   };
 }
 
+const PAGE_CTX_RE = /\[PAGE CONTEXT[\s\S]*?\[END PAGE CONTEXT\]\s*/;
+
+const stripPageContext = (text) =>
+  typeof text === 'string' ? text.replace(PAGE_CTX_RE, '').trim() : text;
+
+// A short or anaphoric message ("do it", "no, on the image", "yes") cannot be
+// understood alone — its meaning lives in the previous request. Detect those so
+// the goal planner can anchor them to the prior user message instead of
+// planning from the fragment literally.
+const isFollowUpMessage = (text) => {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length > 0 && words.length <= 6) return true;
+  return /^(no|yes|ok(ay)?|do it|go|continue|again|proceed|same|retry|try again|not)\b/i.test(text);
+};
+
 if (SessionManager && SessionManager.prototype) {
   const origRunMiniPlanningStep = SessionManager.prototype._runMiniPlanningStep;
   SessionManager.prototype._runMiniPlanningStep = function (userMessage) {
     let cleanGoal = userMessage;
     if (typeof userMessage === 'string') {
+      let userText = userMessage;
+      let pageTitle = null;
       if (userMessage.includes('[PAGE CONTEXT') && userMessage.includes('[END PAGE CONTEXT]')) {
         // Extract user intent
-        const userText = userMessage.split('[END PAGE CONTEXT]').pop().trim();
-        
+        userText = userMessage.split('[END PAGE CONTEXT]').pop().trim();
+
         // Extract Title if present to give page context without the DOM noise
         const titleMatch = userMessage.match(/Title:\s*([^\n]+)/);
-        if (titleMatch && titleMatch[1]) {
-          cleanGoal = `"${userText}" on the page titled "${titleMatch[1].trim()}"`;
-        } else {
-          cleanGoal = userText;
+        if (titleMatch && titleMatch[1]) pageTitle = titleMatch[1].trim();
+      }
+
+      // Anchor fragments like "do it" to the previous user request, otherwise
+      // the goal becomes a context-free restatement of the fragment and the
+      // model loses the conversational thread.
+      let goalText = `"${userText}"`;
+      if (isFollowUpMessage(userText)) {
+        const prevUserTexts = (this.context?.turns ?? [])
+          .filter((t) => t.role === 'user' && typeof t.content === 'string')
+          .map((t) => stripPageContext(t.content))
+          .filter((t) => t && t !== userText);
+        const prev = prevUserTexts[prevUserTexts.length - 1];
+        if (prev) {
+          goalText = `"${userText}" (a follow-up continuing the previous request: "${prev.slice(0, 300)}")`;
         }
       }
+
+      cleanGoal = pageTitle ? `${goalText} on the page titled "${pageTitle}"` : goalText;
+      if (cleanGoal === `"${userMessage}"`) cleanGoal = userMessage;
     }
-    
+
     if (this.goalInjector && cleanGoal !== userMessage) {
       this.goalInjector.goal.statement = cleanGoal;
     }
-    
+
     return origRunMiniPlanningStep.call(this, cleanGoal);
   };
 
@@ -69,14 +100,30 @@ if (SessionManager && SessionManager.prototype) {
   SessionManager.prototype.buildMessages = function (...args) {
     const messages = origBuildMessages.apply(this, args);
     if (messages && Array.isArray(messages)) {
-      return messages.map(msg => {
-        if (typeof msg.content === 'string') {
-          return {
-            ...msg,
-            content: msg.content.replace(/<lemura:/g, '<chromai:').replace(/<\/lemura:/g, '</chromai:')
-          };
+      // Only the LATEST user message keeps its full [PAGE CONTEXT] block. Older
+      // blocks describe the page as it was turns ago — stale selectors and DOM
+      // dumps that drown the conversational thread for small models. Replace
+      // them with a one-line note that keeps page identity for continuity.
+      let lastCtxIdx = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role === 'user' && typeof m.content === 'string' && m.content.includes('[PAGE CONTEXT')) {
+          lastCtxIdx = i;
+          break;
         }
-        return msg;
+      }
+
+      return messages.map((msg, i) => {
+        if (typeof msg.content !== 'string') return msg;
+        let content = msg.content.replace(/<lemura:/g, '<chromai:').replace(/<\/lemura:/g, '</chromai:');
+        if (msg.role === 'user' && i !== lastCtxIdx && content.includes('[PAGE CONTEXT')) {
+          content = content.replace(PAGE_CTX_RE, (block) => {
+            const title = block.match(/^Title:\s*(.+)$/m)?.[1]?.trim();
+            const url = block.match(/^URL:\s*(.+)$/m)?.[1]?.trim();
+            return `[PAGE CONTEXT omitted — this message was sent from ${title ? `"${title}"` : 'a page'}${url ? ` (${url})` : ''}; see the latest message for the current page state]\n\n`;
+          });
+        }
+        return { ...msg, content };
       });
     }
     return messages;

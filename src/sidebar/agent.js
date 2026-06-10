@@ -100,6 +100,7 @@ import { buildSystemPrompt } from './prompt.js';
 import { describeToolCall, selectorsForToolCall, showConfirmHighlight, clearConfirmHighlight } from './skills.js';
 import { AbortHandle, AbortError } from './abort.js';
 import { setAbortHandle } from './tools.js';
+import { logEvent } from './logger.js';
 
 const makeFirewall = (getHandle) => ({
   defaultDecision: 'allow',
@@ -235,6 +236,9 @@ export const createBrowserSession = ({ settings }) => {
     if (abortHandle.aborted) {
       throw new AbortError();
     }
+
+    // Capture event in the agentic log store for the log viewer panel
+    logEvent(event);
 
     // Always refresh stats in real-time for every single event
     refreshStats();

@@ -34,6 +34,12 @@
             <line x1="17" y1="12" x2="22" y2="12"/>
           </svg>
         </button>
+        <button id="btn-logs" title="Agentic logs" class="icon-btn">
+          <!-- terminal / bug icon -->
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+        </button>
         <button id="btn-settings" title="Settings" class="icon-btn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -76,6 +82,52 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Log Viewer Panel -->
+    <div id="log-panel" class="log-panel hidden">
+      <div class="log-panel-header">
+        <div class="log-panel-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+          <span>Agentic Logs</span>
+        </div>
+        <div class="log-panel-actions">
+          <select id="log-filter" class="log-filter-select">
+            <option value="">All types</option>
+            <option value="tool_call">Tool calls</option>
+            <option value="tool_result">Tool results</option>
+            <option value="thinking">Thinking</option>
+            <option value="planning">Planning</option>
+            <option value="verification">Verification</option>
+            <option value="error">Errors</option>
+            <option value="budget">Firewall</option>
+          </select>
+          <button id="log-export" class="log-action-btn" title="Export logs as JSON">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+          <button id="log-clear" class="log-action-btn log-action-btn--danger" title="Clear logs">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            </svg>
+          </button>
+          <button id="log-close" class="log-action-btn" title="Close log panel">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="log-panel-meta">
+        <span id="log-count" class="log-count">0 events</span>
+        <span id="log-live-dot" class="log-live-dot"></span>
+        <span class="log-live-label">Live</span>
+      </div>
+      <div id="log-list" class="log-list"></div>
     </div>
 
     <!-- Confirm overlay: floats above the input bar, always visible, never scrolls away -->

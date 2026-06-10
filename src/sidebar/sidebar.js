@@ -5,6 +5,8 @@ import { capturePageContext, captureViewportBase64, setFocusRegion, getFocusRegi
 import { buildMessageWithContext } from './prompt.js';
 import { prepareContext, resetSessionContext } from './context.js';
 import { isAbortError } from './abort.js';
+import { getEntries, clearLogs, onLogUpdate, logSystem } from './logger.js';
+
 
 let session = null;
 let isRunning = false;
@@ -175,7 +177,9 @@ const clearChat = async () => {
   // Nothing in session now — restore the empty page with the ChromAI icon.
   renderWelcome();
   showToast('Chat cleared');
+  logSystem('Chat cleared — new session started');
 };
+
 
 // ── ASR via Whisper ──
 let mediaRecorder = null;
@@ -432,3 +436,165 @@ if (btnCognitiveStats && popupCognitiveStats) {
 }
 
 initSession();
+logSystem('Session initialized');
+
+// ── Log Viewer Panel ──────────────────────────────────────────────────────
+
+const logPanel    = document.getElementById('log-panel');
+const logList     = document.getElementById('log-list');
+const logCount    = document.getElementById('log-count');
+const logFilter   = document.getElementById('log-filter');
+const btnLogs     = document.getElementById('btn-logs');
+
+let logPanelOpen = false;
+let activeFilter = '';
+
+/** Format timestamp as HH:MM:SS.mmm */
+const fmtTime = (ts) => {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${hh}:${mm}:${ss}.${ms}`;
+};
+
+/** Truncate a long string for preview */
+const trunc = (s, n = 120) => (s && s.length > n) ? s.slice(0, n) + '…' : s;
+
+/** Build a DOM element for a single log entry */
+const buildEntryEl = (entry) => {
+  const hasDetail = entry.input || entry.output || entry.meta;
+
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.dataset.id = entry.id;
+  el.dataset.type = entry.type;
+
+  const chevronSvg = hasDetail
+    ? `<svg class="log-expand-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+         <polyline points="9 18 15 12 9 6"/>
+       </svg>`
+    : '';
+
+  el.innerHTML = `
+    <div class="log-entry-row">
+      <span class="log-entry-icon">${entry.icon}</span>
+      <div class="log-entry-info">
+        <span class="log-entry-label">${entry.label}</span>
+        <span class="log-entry-name">${entry.name ?? ''}${entry.status ? ` · ${entry.status}` : ''}</span>
+      </div>
+      <div class="log-entry-right">
+        <span class="log-type-badge ${entry.color}">${entry.type}</span>
+        <span class="log-entry-time">${fmtTime(entry.ts)}</span>
+        ${chevronSvg}
+      </div>
+    </div>
+    ${hasDetail ? `<div class="log-entry-detail">
+      ${entry.input  ? `<div class="log-detail-section"><div class="log-detail-label">Input</div><pre class="log-detail-pre">${escapeLogHtml(trunc(entry.input, 800))}</pre></div>` : ''}
+      ${entry.output ? `<div class="log-detail-section"><div class="log-detail-label">Output</div><pre class="log-detail-pre">${escapeLogHtml(trunc(entry.output, 800))}</pre></div>` : ''}
+      ${entry.meta   ? `<div class="log-detail-section"><div class="log-detail-label">Metadata</div><pre class="log-detail-pre">${escapeLogHtml(trunc(JSON.stringify(entry.meta, null, 2), 800))}</pre></div>` : ''}
+    </div>` : ''}
+  `;
+
+  if (hasDetail) {
+    el.querySelector('.log-entry-row').addEventListener('click', () => {
+      el.classList.toggle('log-entry-expanded');
+    });
+  }
+
+  return el;
+};
+
+const escapeLogHtml = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const updateLogCount = (entries) => {
+  if (logCount) logCount.textContent = `${entries.length} event${entries.length !== 1 ? 's' : ''}`;
+};
+
+/** Full re-render of the log list (used on open / filter change / clear) */
+const renderLogList = () => {
+  if (!logList) return;
+  const entries = getEntries(activeFilter || null);
+
+  if (entries.length === 0) {
+    logList.innerHTML = `
+      <div class="log-empty">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+        </svg>
+        <span>No log entries yet.<br>Run an agent task to see events here.</span>
+      </div>`;
+    updateLogCount([]);
+    return;
+  }
+
+  logList.innerHTML = '';
+  entries.forEach(e => logList.appendChild(buildEntryEl(e)));
+  updateLogCount(entries);
+  logList.scrollTop = logList.scrollHeight;
+};
+
+/** Append a single entry live (avoids full re-render during active runs) */
+const appendLogEntry = (entry) => {
+  if (!logPanelOpen || !logList) return;
+  if (activeFilter && entry.type !== activeFilter) return;
+
+  // Remove empty state if present
+  const empty = logList.querySelector('.log-empty');
+  if (empty) empty.remove();
+
+  logList.appendChild(buildEntryEl(entry));
+  updateLogCount(getEntries(activeFilter || null));
+
+  // Auto-scroll only if already near the bottom
+  const atBottom = logList.scrollHeight - logList.clientHeight - logList.scrollTop < 80;
+  if (atBottom) logList.scrollTop = logList.scrollHeight;
+};
+
+/** Toggle log panel open/closed */
+const toggleLogPanel = () => {
+  logPanelOpen = !logPanelOpen;
+  logPanel?.classList.toggle('hidden', !logPanelOpen);
+  btnLogs?.classList.toggle('log-active', logPanelOpen);
+  if (logPanelOpen) renderLogList();
+};
+
+// Register live callback so new events stream in while panel is open
+onLogUpdate((entry) => {
+  if (!logPanelOpen) return;
+  if (entry === null) {
+    renderLogList(); // full clear signal
+  } else {
+    appendLogEntry(entry);
+  }
+});
+
+// Button wiring
+btnLogs?.addEventListener('click', toggleLogPanel);
+document.getElementById('log-close')?.addEventListener('click', toggleLogPanel);
+
+document.getElementById('log-clear')?.addEventListener('click', () => {
+  clearLogs();
+  if (logPanelOpen) renderLogList();
+  showToast('Logs cleared');
+});
+
+document.getElementById('log-export')?.addEventListener('click', () => {
+  const entries = getEntries(activeFilter || null);
+  const json = JSON.stringify(entries, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `chromai-logs-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`Exported ${entries.length} entries`);
+});
+
+logFilter?.addEventListener('change', () => {
+  activeFilter = logFilter.value;
+  if (logPanelOpen) renderLogList();
+});
+

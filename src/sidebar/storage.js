@@ -13,7 +13,10 @@ const DEFAULTS = {
   visualContext: false,
   enableGoalPlanning: true,
   goalInjectionFrequency: 'always',
-  goalInjectionPosition: 'system_prompt',
+  // 'pre_turn' appends the goal block as the LAST message each iteration —
+  // small models attend to the end of the context far better than to a goal
+  // buried inside a long system prompt.
+  goalInjectionPosition: 'pre_turn',
   enableContinuationPlanning: false,
   parallelToolCalls: true,
   maxTokensPerTool: 4000,

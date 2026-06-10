@@ -63,6 +63,10 @@ Rules is simple, one row per concept, as following syntax. Description should no
 
 **[Auto-Wait Heuristic]**		clickElement auto-runs waitForIdle when the selector looks like a send/submit/search control (regex on selector text, EN+FR), and pressKey auto-waits after a bare Enter — so the agent reads settled content without being told to.
 
+**[Goal Re-Planning]**		createBrowserSession() wraps session.stream()/run() to null the GoalInjector before each run — lemura only creates it on a session's first message, so without this every later message would execute under the first message's stale (often completed) goal block, causing the agent to drift. Default goalInjectionPosition is 'pre_turn' so the goal block lands at the end of the message list, where small models attend best.
+
+**[Already-Sent Guard]**		Anti-double-submit signals: TYPE_TEXT returns autoSubmitted: true (with a hint) when the field is empty right after typing (the page auto-sent the text), and PRESS_KEY skips a bare Enter on an empty composer, returning skipped: true plus a page snapshot. The system prompt tells the agent these mean "already sent — read the response, don't submit again".
+
 **[Stable Selector Builder]**		buildSelector() prefers handles that survive SPA re-renders: unique id → data-testid/data-cy/data-control-name → name attr → aria-label (optionally role-scoped) → ancestor path of stable class tokens + nth-of-type, validated for uniqueness at each step. Framework-generated class tokens (css-, sc-, MuiBox, 6+ char hashes, …) are never used as anchors.
 
 **[Accessible Name]**		accessibleName() resolves an element's label roughly per the ARIA accname algorithm: aria-label → aria-labelledby → associated/wrapping <label> → title/placeholder → child img alt → trimmed text content, capped at 100 chars. Shared by all discovery tools so the agent reasons over consistent labels.

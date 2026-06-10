@@ -458,7 +458,7 @@ const handlers = {
         seen.add(el);
         return includeHidden || isVisible(el);
       })
-      .slice(0, 140)
+      .slice(0, 80)
       .map(el => ({
         tag: el.tagName.toLowerCase(),
         type: el.isContentEditable ? 'contenteditable' : (el.type || null),

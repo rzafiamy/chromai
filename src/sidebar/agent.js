@@ -343,6 +343,21 @@ export const createBrowserSession = ({ settings }) => {
     onTrace: tracer
   });
 
+  // lemura creates the GoalInjector only on the FIRST run of a session
+  // (`if (enableGoalPlanning && !this.goalInjector)`), so every later message
+  // would execute under the first message's — often already completed — goal
+  // block, injected into every iteration. Drop the injector before each run so
+  // the goal is re-created and re-planned from the new message.
+  for (const method of ['stream', 'run']) {
+    const orig = session[method]?.bind(session);
+    if (orig) {
+      session[method] = (userMessage) => {
+        session.goalInjector = null;
+        return orig(userMessage);
+      };
+    }
+  }
+
   if (session.mcpReady) {
     session.mcpReady.then(() => {
       for (const srv of settings.mcpServers || []) {

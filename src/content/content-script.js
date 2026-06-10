@@ -4,6 +4,39 @@
 const MAX_TEXT_LENGTH = 15000;
 const MAX_HTML_LENGTH = 30000;
 
+// ── Network activity tracker ────────────────────────────────────────────────
+// Monkey-patch XHR and fetch so we can count in-flight requests.
+// This lets WAIT_FOR_IDLE know when the page is truly quiet.
+(function _installNetworkTracker() {
+  if (window.__chromaiNetworkTracker) return; // already installed (content script re-injected)
+  let _inflight = 0;
+  const tracker = { get inflight() { return _inflight; } };
+  window.__chromaiNetworkTracker = tracker;
+
+  // -- fetch --
+  const origFetch = window.fetch;
+  window.fetch = function (...args) {
+    _inflight++;
+    return origFetch.apply(this, args).finally(() => { _inflight = Math.max(0, _inflight - 1); });
+  };
+
+  // -- XMLHttpRequest --
+  const origOpen = XMLHttpRequest.prototype.open;
+  const origSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (...args) {
+    this.__chromaiTracked = true;
+    return origOpen.apply(this, args);
+  };
+  XMLHttpRequest.prototype.send = function (...args) {
+    if (this.__chromaiTracked) {
+      _inflight++;
+      const dec = () => { _inflight = Math.max(0, _inflight - 1); };
+      this.addEventListener('loadend', dec, { once: true });
+    }
+    return origSend.apply(this, args);
+  };
+})();
+
 // Traverse Shadow DOM boundaries. LinkedIn and other SPAs render modals and
 // interactive elements inside shadow roots that are invisible to querySelector.
 function querySelectorDeep(selector, root = document) {
@@ -326,7 +359,7 @@ const handlers = {
     return { filled: results.filter(r => r.success).length, results };
   },
 
-  SUBMIT_FORM({ selector, rootSelector } = {}) {
+  async SUBMIT_FORM({ selector, rootSelector, waitAfterMs = 600 } = {}) {
     const { el } = resolveActionTarget(selector, rootSelector);
     if (!el) return { success: false, error: `Element not found: ${selector}` };
 
@@ -334,8 +367,13 @@ const handlers = {
     const form = el.tagName === 'FORM' ? el : el.closest('form');
     if (form) {
       const submitBtn = form.querySelector('[type="submit"]:not([disabled])');
-      if (submitBtn) { submitBtn.click(); return { success: true, method: 'submit-button' }; }
+      if (submitBtn) {
+        submitBtn.click();
+        await new Promise(r => setTimeout(r, waitAfterMs));
+        return { success: true, method: 'submit-button' };
+      }
       form.requestSubmit?.() ?? form.submit();
+      await new Promise(r => setTimeout(r, waitAfterMs));
       return { success: true, method: 'form-submit' };
     }
 
@@ -348,6 +386,7 @@ const handlers = {
     });
     if (submitCandidates.length > 0) {
       submitCandidates[0].click();
+      await new Promise(r => setTimeout(r, waitAfterMs));
       return { success: true, method: 'submit-button-nearby', selector: submitCandidates[0].getAttribute('aria-label') || submitCandidates[0].textContent.trim().slice(0, 40) };
     }
 
@@ -356,6 +395,7 @@ const handlers = {
     el.dispatchEvent(new KeyboardEvent('keydown', enterOpts));
     el.dispatchEvent(new KeyboardEvent('keypress', enterOpts));
     el.dispatchEvent(new KeyboardEvent('keyup', enterOpts));
+    await new Promise(r => setTimeout(r, waitAfterMs));
     return { success: true, method: 'enter-keydown' };
   },
 
@@ -600,12 +640,44 @@ const handlers = {
     }
 
     const finalValue = isContentEditable ? el.innerText.slice(0, 200) : el.value.slice(0, 200);
-    return { success: true, typed: text.length, value: finalValue };
+
+    // Detect auto-submit: if the field is now empty/cleared, the page framework
+    // submitted the text automatically (e.g. Gemini Advanced, some chat UIs).
+    // Signal this so the caller knows NOT to press Enter again.
+    const isEmpty = finalValue.trim().length === 0;
+    return {
+      success: true,
+      typed: text.length,
+      value: finalValue,
+      autoSubmitted: isEmpty,
+      ...(isEmpty ? { hint: 'Field was cleared after typing — the form auto-submitted. Do NOT press Enter. Call getPageContent after waiting for the response.' } : {})
+    };
   },
 
-  PRESS_KEY({ selector, key, modifiers = [], rootSelector } = {}) {
+  async PRESS_KEY({ selector, key, modifiers = [], rootSelector, waitAfterMs = 400 } = {}) {
     const target = selector ? resolveActionTarget(selector, rootSelector).el : document.activeElement;
     if (selector && !target) return { success: false, error: `Element not found: ${selector}` };
+
+    // Guard: if the element is empty and Enter is requested, the content was
+    // already auto-submitted by the page. Skip to avoid double-submission.
+    if ((key === 'Enter' || key === 'Return') && modifiers.length === 0) {
+      const currentContent = target.isContentEditable
+        ? target.innerText?.trim()
+        : target.value?.trim();
+      if (currentContent === '') {
+        // Read current page content to give the agent what it needs
+        const snap = (document.body?.innerText || '').slice(0, 6000);
+        return {
+          success: true,
+          key,
+          target: target.tagName,
+          skipped: true,
+          reason: 'Field already empty — content was auto-submitted by the page. Enter was NOT pressed to avoid double-submission.',
+          pageSnapshot: { title: document.title, url: location.href, text: snap }
+        };
+      }
+    }
+
     const opts = {
       key,
       code: key,
@@ -617,6 +689,8 @@ const handlers = {
     };
     target.dispatchEvent(new KeyboardEvent('keydown', opts));
     target.dispatchEvent(new KeyboardEvent('keyup', opts));
+    // Give the page a moment to process key-triggered SPA state changes
+    await new Promise(r => setTimeout(r, waitAfterMs));
     return { success: true, key, target: target.tagName };
   },
 
@@ -753,6 +827,78 @@ const handlers = {
         observer.disconnect();
         resolve({ found: false, elapsed: timeoutMs });
       }, timeoutMs);
+    });
+  },
+
+  /**
+   * Wait until the page is "idle": no in-flight XHR/fetch requests AND the DOM
+   * has stopped mutating for `settleMs` milliseconds.
+   *
+   * This is the primary tool to use after triggering an AI chat response,
+   * submitting a search, navigating within a SPA, or any action that fires
+   * async network requests before content appears.
+   *
+   * @param {object} options
+   * @param {number} [options.timeoutMs=30000]  Hard cap — resolve even if not idle
+   * @param {number} [options.settleMs=1500]    Quiet window required (no XHR + no DOM mutation)
+   * @param {string} [options.waitForSelector]  Optional: also wait until this selector appears
+   */
+  WAIT_FOR_IDLE({ timeoutMs = 30000, settleMs = 1500, waitForSelector } = {}) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      let settleTimer = null;
+      let selectorFound = false;
+      let observer = null;
+
+      const tracker = window.__chromaiNetworkTracker;
+
+      const finish = (reason) => {
+        clearTimeout(settleTimer);
+        observer?.disconnect();
+        resolve({
+          idle: true,
+          reason,
+          elapsed: Date.now() - start,
+          selectorFound: waitForSelector ? selectorFound : undefined
+        });
+      };
+
+      // Hard timeout — never block the agent forever
+      const hardTimeout = setTimeout(() => finish('timeout'), timeoutMs);
+
+      const checkIdle = () => {
+        const networkQuiet = !tracker || tracker.inflight === 0;
+        const selectorOk   = !waitForSelector || !!document.querySelector(waitForSelector);
+        if (selectorOk && !selectorFound && waitForSelector) selectorFound = true;
+        return networkQuiet && selectorOk;
+      };
+
+      const scheduleSettle = () => {
+        clearTimeout(settleTimer);
+        if (checkIdle()) {
+          settleTimer = setTimeout(() => {
+            // Re-verify after the settle window — network might have gone active again
+            if (checkIdle()) {
+              clearTimeout(hardTimeout);
+              finish('idle');
+            } else {
+              scheduleSettle();
+            }
+          }, settleMs);
+        }
+      };
+
+      // Watch DOM for mutations — each mutation resets the settle window
+      observer = new MutationObserver(() => {
+        if (waitForSelector && !selectorFound && document.querySelector(waitForSelector)) {
+          selectorFound = true;
+        }
+        scheduleSettle();
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+
+      // Kick off immediately — maybe the page is already idle
+      scheduleSettle();
     });
   },
 

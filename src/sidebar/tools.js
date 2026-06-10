@@ -63,6 +63,25 @@ export const sendToContentScript = async (action, params = {}) => {
   return _abortHandle ? _abortHandle.race(run()) : run();
 };
 
+// Shared idle-wait helper used by action tools that trigger async page updates.
+// Silently swallows errors so a content-script failure never blocks the tool result.
+const _waitIdle = (opts = {}) => {
+  try {
+    return sendToContentScript('WAIT_FOR_IDLE', {
+      timeoutMs: opts.timeoutMs ?? 30000,
+      settleMs:  opts.settleMs  ?? 1200
+    }).catch(() => null);
+  } catch { return Promise.resolve(null); }
+};
+
+// Returns true when a selector or aria-label strongly suggests a send/submit action
+// so clickElement can auto-wait for the async response without being told to.
+const _looksLikeSubmit = (selector = '') => {
+  const s = selector.toLowerCase();
+  return /send|submit|post|search|go|ask|envoyer|confirmer|valider|recherche/.test(s) &&
+    !/cancel|annuler|close|fermer|dismiss/.test(s);
+};
+
 const captureTabScreenshot = async () => {
   // captureVisibleTab must be called from the sidebar (extension page), not content script
   const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 85 });
@@ -111,7 +130,7 @@ const navigateTab = async (url) => {
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
       resolve();
-    }, 10000);
+    }, 15000);
     const listener = (tabId, info) => {
       if (tabId === tab.id && info.status === 'complete') {
         clearTimeout(timeout);
@@ -121,7 +140,9 @@ const navigateTab = async (url) => {
     };
     chrome.tabs.onUpdated.addListener(listener);
   });
-  await new Promise((r) => setTimeout(r, 800));
+  // Give the page extra time for JS bundles, SPA hydration, and initial
+  // XHR/fetch requests to fire and settle before we read content.
+  await new Promise((r) => setTimeout(r, 1200));
 };
 
 export const capturePageContext = async () => {
@@ -213,13 +234,19 @@ export const browserTools = [
       },
       required: ['selector']
     },
-    execute: async ({ selector, waitAfterMs = 500 }) => {
+    execute: async ({ selector, waitAfterMs = 800 }) => {
       const result = await sendToContentScript('CLICK_ELEMENT', { selector, waitAfterMs, rootSelector: _focusRegion || undefined });
       // Auto-expand the focus region to a dialog the click just opened (it was
       // portaled outside the region, so the agent now needs to act inside it).
       if (result?.openedDialog && _focusRegion && result.openedDialog !== _focusRegion) {
         setFocusRegion(result.openedDialog);
         _onRegionAutoExpand?.(result.openedDialog);
+      }
+      // If this click targeted a send/submit/search button, the page will fire
+      // async network requests. Wait for the page to settle before returning so
+      // the agent reads accurate post-action content rather than a loading state.
+      if (_looksLikeSubmit(selector)) {
+        await _waitIdle();
       }
       return result;
     }
@@ -306,6 +333,22 @@ export const browserTools = [
       required: ['selector']
     },
     execute: ({ selector, timeoutMs = 5000 }) => sendToContentScript('WAIT_FOR_ELEMENT', { selector, timeoutMs })
+  },
+
+  {
+    name: 'waitForIdle',
+    description: 'Wait until the page has finished loading — no in-flight network requests (XHR/fetch) AND the DOM has stopped changing for a quiet window. Call this after: (1) submitting a prompt to an AI chat (Gemini, ChatGPT, Claude, etc.) and before reading the response; (2) clicking a search/submit button that triggers an API call; (3) any SPA navigation or async content load where the result is not immediately available. Optionally also waits for a specific CSS selector to appear.',
+    timeoutMs: 60000,
+    parameters: {
+      type: 'object',
+      properties: {
+        timeoutMs: { type: 'number', description: 'Hard timeout in milliseconds before giving up and continuing (default 30000)' },
+        settleMs: { type: 'number', description: 'Milliseconds the page must stay quiet (no XHR + no DOM mutation) to be considered idle (default 1500)' },
+        waitForSelector: { type: 'string', description: 'Optional CSS selector that must appear in the DOM before the idle condition is checked (e.g. a response container, a result element).' }
+      }
+    },
+    execute: ({ timeoutMs = 30000, settleMs = 1500, waitForSelector } = {}) =>
+      sendToContentScript('WAIT_FOR_IDLE', { timeoutMs, settleMs, waitForSelector })
   },
 
   {
@@ -433,8 +476,17 @@ export const browserTools = [
       },
       required: ['key']
     },
-    execute: ({ selector, key, modifiers = [] }) =>
-      sendToContentScript('PRESS_KEY', { selector, key, modifiers, rootSelector: _focusRegion || undefined })
+    execute: async ({ selector, key, modifiers = [] }) => {
+      const result = await sendToContentScript('PRESS_KEY', { selector, key, modifiers, rootSelector: _focusRegion || undefined });
+      // Pressing Enter (with no modifiers) is the primary way to submit AI chat
+      // prompts, search queries, and SPA forms. The response always arrives async.
+      // Automatically wait for the page to settle before returning so the agent
+      // doesn't read stale content or hallucinate an answer.
+      if ((key === 'Enter' || key === 'Return') && modifiers.length === 0) {
+        await _waitIdle();
+      }
+      return result;
+    }
   },
 
   {

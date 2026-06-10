@@ -344,7 +344,7 @@ const TOOL_ICONS = {
   extractLinks: '🔗', extractTable: '📊', getInteractiveElements: '🖱️',
   getForms: '📋', clickElement: '👆', fillForm: '✏️', submitForm: '📤',
   navigateTo: '🌐', scrollPage: '⬇️', scrollAndRead: '📖',
-  highlightElement: '🔦', waitForElement: '⏳', analyzePageVisually: '👁️',
+  highlightElement: '🔦', waitForElement: '⏳', waitForIdle: '⌛', analyzePageVisually: '👁️',
   findActionButton: '🎯', findCommentBox: '💬', dismissOverlay: '🚫',
   classifyPage: '🧭', searchOnPage: '🔍', readThread: '🧵', writeToRegion: '✍️',
   typeText: '⌨️', pressKey: '⏎', captureRegion: '📸', ocrRegion: '📝'
@@ -366,6 +366,7 @@ const TOOL_LABELS = {
   scrollAndRead: 'Scrolling and reading',
   highlightElement: 'Highlighting element',
   waitForElement: 'Waiting for element',
+  waitForIdle: 'Waiting for page to settle',
   analyzePageVisually: 'Analyzing page visually',
   findActionButton: 'Finding button',
   findCommentBox: 'Finding comment box',

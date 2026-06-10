@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-10
+
+### Added
+- **"Change target" in the confirm modal**: when the red outline marks the wrong element, a new 🎯 Change target button activates the on-page picker — the user clicks the correct element and the action (clickElement, typeText, pressKey, submitForm, clickAtCoordinates) runs on the user-picked target instead of the model-proposed one. Re-pick as many times as needed before confirming.
+- **`askUserToPickElement` tool**: last-resort rung of the new discovery escalation ladder — when DOM discovery and visual analysis both fail, the agent asks the user to click the element it needs (toast + chat message explain what to click); the picked element becomes the active focus region.
+- **Discovery escalation ladder (system prompt)**: the agent may no longer repeat the same discovery tool with the same arguments more than twice. It must escalate: targeted discovery → look at the page (getLabeledScreenshot / analyzePageVisually) → ask the user to pick the element.
+- **Chat/DM composer detection**: `findCommentBox` now finds Messenger-style chat composers (Facebook/Instagram/LinkedIn messaging popups) — `aria-label`/placeholder "message" patterns in English and French, plus a generic in-dialog contenteditable fallback. Returned selectors are qualified so the chat composer is never confused with the "Message" button.
+- **Visual indicator for coordinate clicks**: the confirm modal for `clickAtCoordinates` now outlines the element *under the point* in red (labeled `click @ (x, y) → tag`), so the user sees exactly what the click will hit before approving.
+
+### Fixed
+- **Follow-up amnesia in multi-turn conversations**: short or anaphoric messages ("do it", "no, on the image") were planned in isolation — the per-message goal became a context-free restatement of the fragment, and stale `[PAGE CONTEXT]` blocks from older turns drowned the conversational thread. Goals for follow-up messages are now anchored to the previous user request, only the latest user message keeps its full page-context block (older ones are replaced by a one-line note), and a FOLLOW-UP classification rule resolves "it"/"that"/"no" from history before acting.
+- **Agent claimed actions it never performed**: the agent could report "I've sent the message" after only locating inputs and clicking around, without ever typing. New strictly-enforced rules: a send/post claim requires the corresponding typeText/writeToRegion call to have run, and the agent must re-read the conversation and confirm its text appears before reporting success. The Facebook/Instagram messaging recipe is now an explicit 4-step checklist ending in verification.
+- **Coordinate clicks landed at the wrong position**: coordinates estimated by the vision model from screenshots are in physical pixels (DPR-scaled) while `elementFromPoint` uses CSS pixels. `CLICK_AT_COORDINATES` now auto-corrects physical-pixel input, rejects out-of-viewport points with a corrective error, and the model is forbidden from estimating coordinates visually — only `getLabeledScreenshot`'s exact cx/cy values (or selectors) are allowed.
+- **`clickAtCoordinates` bypassed the confirmation firewall**: coordinate-based clicks executed without user approval; they now require confirmation like every other page-mutating action.
+
 ## [1.4.0] - 2026-06-07
 
 ### Added

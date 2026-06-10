@@ -382,8 +382,8 @@ document.getElementById('btn-pick-region').addEventListener('click', () => {
 
 document.getElementById('btn-clear-region').addEventListener('click', clearFocusRegion);
 
-// Tab change: reset session but preserve UI
-chrome.runtime.onMessage.addListener(({ action, selector }) => {
+// Tab change: reset session + optionally refresh the welcome screen
+chrome.runtime.onMessage.addListener(({ action, selector, tabId }) => {
   if (action === 'REGION_PICKED') {
     isPickerActive = false;
     setFocusRegion(selector);
@@ -398,25 +398,55 @@ chrome.runtime.onMessage.addListener(({ action, selector }) => {
     return;
   }
   if (action !== 'TAB_CHANGED') return;
+
   // Clear focus region when navigating to a new tab
   setFocusRegion(null);
   updatePickerUI();
+
   // New tab → new page: drop the cached page profile so the next turn re-classifies.
   resetSessionContext();
+
   // Start a fresh session for the new tab — history from previous tab is irrelevant
   if (session) {
     try { session.reset(); } catch { /* ignore */ }
     session = null;
   }
   clearHistory();
-  getSettings().then((s) => {
+  getSettings().then(async (s) => {
     currentSettings = s;
     if (s.apiKey) {
       session = createBrowserSession({ settings: s });
       updateModelBadge(s.model);
     }
+
+    // ── Refresh welcome screen on tab switch ──────────────────────────────
+    // Only update if:
+    //   1. The UI is in empty state (welcome screen is visible)
+    //   2. No agentic run is in progress (avoids clobbering an active session)
+    const isEmptyState = !!document.querySelector('.welcome-message');
+    if (isEmptyState && !isRunning) {
+      // Fetch tab context — use the tabId relayed by the service worker so
+      // we get the exact tab that just became active, not a stale query result.
+      let tabCtx = null;
+      try {
+        if (tabId != null) {
+          const tab = await chrome.tabs.get(tabId);
+          tabCtx = { url: tab.url || '', title: tab.title || '' };
+        } else {
+          tabCtx = await getActiveTabContext();
+        }
+      } catch { /* non-fatal */ }
+
+      // Wipe and repaint the welcome screen with fresh context
+      const messagesContainer = document.getElementById('messages');
+      if (messagesContainer) messagesContainer.innerHTML = '';
+      renderWelcome(tabCtx);
+
+      logSystem(`Tab changed → ${tabCtx?.url ?? 'unknown'}`);
+    }
   });
 });
+
 
 // ── Session Cognitive Stats Toggle ──
 const btnCognitiveStats = document.getElementById('btn-cognitive-stats');
